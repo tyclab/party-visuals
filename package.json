@@ -1,0 +1,50 @@
+{
+  "name": "party-visuals",
+  "version": "0.1.0",
+  "description": "Party graphics for OBS that keep time with the lightshow: a NodeCG bundle with a beat-synced colour wash and a pulsing bar, run beside EclipseGraphics.",
+  "private": true,
+  "license": "MIT",
+  "homepage": "https://github.com/tyclab/party-visuals",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/tyclab/party-visuals.git"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test \"test/*.test.js\""
+  },
+  "dependencies": {
+    "socket.io-client": "^4.8.3"
+  },
+  "devDependencies": {
+    "socket.io": "^4.8.3"
+  },
+  "nodecg": {
+    "compatibleRange": "^2.0.0",
+    "dashboardPanels": [
+      {
+        "name": "party",
+        "title": "Party visuals",
+        "file": "party.html",
+        "width": 3,
+        "headerColor": "#3a1046"
+      }
+    ],
+    "graphics": [
+      {
+        "file": "wash.html",
+        "width": 1920,
+        "height": 1080,
+        "singleInstance": false
+      },
+      {
+        "file": "bar.html",
+        "width": 1920,
+        "height": 1080,
+        "singleInstance": false
+      }
+    ]
+  }
+}
