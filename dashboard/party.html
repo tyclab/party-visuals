@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Party visuals</title>
+  <link rel="stylesheet" href="party.css">
+</head>
+<body>
+  <section class="link" aria-live="polite">
+    <span class="dot" id="dot"></span>
+    <span id="status">…</span>
+    <div class="detail" id="detail"></div>
+  </section>
+
+  <section class="tempo">
+    <span class="bpm" id="bpm">—</span>
+    <span class="unit">bpm</span>
+    <span class="source" id="source"></span>
+    <div class="detail" id="phase"></div>
+  </section>
+
+  <section class="palette">
+    <div class="swatches" id="swatches"></div>
+    <div class="detail" id="paletteSource"></div>
+    <div class="swatches dim" id="lookSwatches" hidden></div>
+  </section>
+
+  <section class="graphic" data-target="wash">
+    <h2>Colour wash</h2>
+    <button type="button" class="air">…</button>
+    <label>Intensity <input type="range" min="0" max="100" step="1"> <output>—</output></label>
+  </section>
+
+  <section class="graphic" data-target="bar">
+    <h2>Beat bar</h2>
+    <button type="button" class="air">…</button>
+    <label>Intensity <input type="range" min="0" max="100" step="1"> <output>—</output></label>
+  </section>
+
+  <section class="all">
+    <button type="button" id="allOff">All off</button>
+  </section>
+
+  <details class="urls">
+    <summary>OBS and Companion addresses</summary>
+    <ul id="urls"></ul>
+  </details>
+
+  <script src="../shared/palette.js"></script>
+  <script src="party.js"></script>
+</body>
+</html>

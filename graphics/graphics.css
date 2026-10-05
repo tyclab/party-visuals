@@ -1,0 +1,15 @@
+/* A transparent 1920×1080 page: OBS lays it over (or under) the other sources. */
+html, body {
+  margin: 0;
+  padding: 0;
+  width: 1920px;
+  height: 1080px;
+  overflow: hidden;
+  background: transparent;
+}
+
+#stage {
+  display: block;
+  width: 1920px;
+  height: 1080px;
+}
