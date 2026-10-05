@@ -111,6 +111,8 @@ class LightshowClient extends EventEmitter {
     // A fresh socket per attempt: nothing of a failed one carries over.
     const socket = io(this.target.origin, {
       path: `${this.target.base}/socket.io`,
+      // WebSocket first, as the lightshow's own pages connect; long-polling
+      // if something on the way will not upgrade the connection.
       transports: ['websocket', 'polling'],
       tryAllTransports: true,
       reconnection: false,
@@ -142,6 +144,8 @@ class LightshowClient extends EventEmitter {
       this.socketUp = false;
       this.attempted = true;
       if (err && err.data && err.data.code === 'unauthorized') {
+        // Polling with the same token would be refused too; retrying the
+        // socket is enough to notice when the token is accepted again.
         this.refused = `the lightshow refused the token: ${this._clean(err.message)}`;
       } else {
         this.refused = null;
@@ -169,6 +173,7 @@ class LightshowClient extends EventEmitter {
     socket.disconnect();
   }
 
+  /** One retry at a time, however many errors the failed attempt raised. */
   _retryLater() {
     if (this.stopped || this.retryTimer) {
       this._update();
@@ -221,6 +226,7 @@ class LightshowClient extends EventEmitter {
       if (this.#token) headers['x-lightshow-token'] = this.#token;
       const res = await this.fetch(`${this.target.display}/api/state`, { headers, signal: abort.signal });
       if (res.status === 401 || res.status === 403) {
+        // An unread body holds the connection open until it is collected.
         await res.body?.cancel();
         this.httpUp = false;
         this.refused = `the lightshow refused the token (HTTP ${res.status})`;
@@ -230,6 +236,7 @@ class LightshowClient extends EventEmitter {
         this.httpError = `GET /api/state answered HTTP ${res.status}`;
       } else {
         const state = await res.json();
+        // The socket may have come back while this request was out; it wins.
         if (!this.stopped && !this.socketUp && this.mirror.applyFullState(state)) {
           this.httpUp = true;
           this.refused = this.httpError = null;
@@ -265,6 +272,11 @@ class LightshowClient extends EventEmitter {
     this.emit('look', { ...readLook(this.mirror.state), changed: [...this.mirror.lastChanged] });
   }
 
+  /**
+   * The status from what is known: a working socket or poll is connected
+   * whatever the other path says; a refusal is an error, since it will not
+   * fix itself; anything else that failed is a retry in progress.
+   */
   _compute() {
     const connected = !this.stopped && (this.socketUp || this.httpUp);
     let status;

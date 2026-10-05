@@ -15,6 +15,7 @@
 
   const SOURCES = { auto: 'Auto show', cdj: 'CDJ', track: 'Track', live: 'Live input', tap: 'Tap' };
 
+  // "Last update" counts up between updates, so it is redrawn every second.
   function ago(ms) {
     if (!ms) return 'never';
     const s = Math.max(0, Math.round((Date.now() - ms) / 1000));
@@ -95,6 +96,8 @@
     }
   }
 
+  // The answer comes back through the controls Replicant; only a refusal
+  // is worth a line in NodeCG's log.
   function send(target, cmd) {
     nodecg.sendMessage('cmd', { target, cmd }).then((result) => {
       if (result && !result.ok) nodecg.log.warn(result.error);
@@ -123,6 +126,8 @@
   }
   $('allOff').addEventListener('click', () => send('all', 'air.off'));
 
+  // Built from the address this dashboard was opened at, which is the one
+  // OBS and Companion on the same machine use too.
   function showUrls() {
     const base = `${location.origin}/bundles/${nodecg.bundleName}`;
     const lines = [
