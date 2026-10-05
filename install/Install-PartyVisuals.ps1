@@ -30,14 +30,16 @@ already in place is left as it is.
      user logs on.
 
 -WhatIf shows what would change and changes nothing. -Uninstall removes the
-scheduled task and the whole <Root> folder.
+scheduled task and the whole <Root> folder; it refuses a folder this script
+did not set up (no marker file in it) and a <Root> that is a link.
 
 .PARAMETER LightshowUrl
 The lightshow server, http(s)://host:port, with no token in it. Needed on the
 first run; later runs keep the address already configured unless it is given.
 
 .PARAMETER Root
-The install folder. Default: %LOCALAPPDATA%\PartyVisuals.
+The install folder, a folder of its own (not a drive root). Default:
+%LOCALAPPDATA%\PartyVisuals.
 
 .PARAMETER EclipseGraphicsCommit
 The EclipseGraphics commit to install (40 hex digits).
@@ -52,7 +54,7 @@ Ask for the lightshow token again and replace the stored one.
 Register (or update) the scheduled task that starts NodeCG at logon.
 
 .PARAMETER Uninstall
-Remove the scheduled task and the install folder.
+Remove the scheduled task and the install folder, if this script set it up.
 
 .EXAMPLE
 powershell -ExecutionPolicy Bypass -File .\Install-PartyVisuals.ps1 -LightshowUrl http://lightshow.example:3000 -Autostart
@@ -70,6 +72,7 @@ param(
 
     [Parameter(ParameterSetName = 'Install')]
     [Parameter(ParameterSetName = 'Uninstall')]
+    [ValidateNotNullOrEmpty()]
     [string] $Root = (Join-Path $env:LOCALAPPDATA 'PartyVisuals'),
 
     [Parameter(ParameterSetName = 'Install')]
@@ -216,7 +219,9 @@ function Get-NormalizedRepoUrl([string] $Url) {
 }
 
 function Test-LightshowUrl([string] $Url) {
-    # The reason the address is refused, or $null. The bundle refuses the same.
+    # The reason the address is refused, or $null. Only the documented form,
+    # http(s)://host:port, passes; the bundle itself refuses credentials and
+    # ?token= in it and would take a path.
     $uri = $null
     if (-not [System.Uri]::TryCreate($Url, [System.UriKind]::Absolute, [ref] $uri)) { return 'it is not an absolute address' }
     if ($uri.Scheme -ne 'http' -and $uri.Scheme -ne 'https') { return 'it must start with http:// or https://' }
@@ -361,7 +366,8 @@ function Sync-Checkout {
         if ((Get-NormalizedRepoUrl $origin) -ne (Get-NormalizedRepoUrl $Url)) {
             throw "$Dir is a checkout of '$origin', not of $Url. Move it away and run again."
         }
-        $changes = (Invoke-Native $Git @('-C', $Dir, 'status', '--porcelain', '--untracked-files=no') -Capture).Text
+        # --no-optional-locks: status would otherwise rewrite the index, also under -WhatIf.
+        $changes = (Invoke-Native $Git @('--no-optional-locks', '-C', $Dir, 'status', '--porcelain', '--untracked-files=no') -Capture).Text
         if ($changes) {
             throw "$Dir has local changes (git -C `"$Dir`" status). Put them aside and run again."
         }
@@ -592,11 +598,25 @@ function Get-AutostartTask {
 }
 
 function Test-TaskUsesRoot($Task, [string] $Dir) {
+    # With the separator, so ...\PartyVisuals does not match ...\PartyVisuals2.
+    $inside = $Dir.TrimEnd('\') + '\'
     foreach ($a in @($Task.Actions)) {
         $text = "$($a.Arguments) $($a.WorkingDirectory)"
-        if ($text.IndexOf($Dir, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { return $true }
+        if ($text.IndexOf($inside, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { return $true }
     }
     return $false
+}
+
+function Resolve-InstallRoot([string] $Path) {
+    # The full path without a trailing separator. A drive or share root is
+    # refused: -Uninstall removes the whole folder.
+    $full = [System.IO.Path]::GetFullPath($ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path))
+    $trimmed = $full.TrimEnd('\', '/')
+    $top = [System.IO.Path]::GetPathRoot($full).TrimEnd('\', '/')
+    if ($trimmed.Length -le $top.Length) {
+        throw "-Root $Path is a drive or share root; give the install a folder of its own."
+    }
+    return $trimmed
 }
 
 function Write-Marker {
@@ -715,6 +735,18 @@ function Invoke-Install {
 # ---------------------------------------------------------------- uninstall
 
 function Invoke-Uninstall {
+    # The folder is checked before anything is removed, so a refusal leaves
+    # the scheduled task in place too.
+    $present = Test-Path -LiteralPath $Root
+    if ($present) {
+        if ((Get-Item -LiteralPath $Root -Force).Attributes -band [System.IO.FileAttributes]::ReparsePoint) {
+            throw "$Root is a link to another folder, not a folder of its own; nothing removed. Remove the link and the folder it points to by hand."
+        }
+        if (-not (Test-Path -LiteralPath (Join-Path $Root $MarkerName))) {
+            throw "$Root was not set up by this script (no $MarkerName in it); nothing removed."
+        }
+    }
+
     Write-Step 'Autostart'
     $task = Get-AutostartTask
     if ($task -and (Test-TaskUsesRoot $task $Root)) {
@@ -730,15 +762,14 @@ function Invoke-Uninstall {
     }
 
     Write-Step "Install folder $Root"
-    if (-not (Test-Path -LiteralPath $Root)) {
+    if (-not $present) {
         Write-Detail 'not there; nothing to remove'
         return
     }
-    if (-not (Test-Path -LiteralPath (Join-Path $Root $MarkerName))) {
-        throw "$Root was not set up by this script (no $MarkerName in it); nothing removed."
-    }
     Assert-NodecgStopped 'its files are about to be removed.'
     if ($PSCmdlet.ShouldProcess($Root, 'remove the folder: EclipseGraphics, party-visuals, NodeCG''s configuration, database and logs, and the token file')) {
+        # Remove-Item deletes a junction inside the folder, not the folder it
+        # points to (test\install.test.ps1 checks it).
         Remove-Item -LiteralPath $Root -Recurse -Force -Confirm:$false
         Write-Detail "$Root removed"
     }
@@ -746,5 +777,8 @@ function Invoke-Uninstall {
 
 # ---------------------------------------------------------------- main
 
-$Root = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Root).TrimEnd('\')
+# Dot-sourced (test\install.test.ps1): the functions only.
+if ($MyInvocation.InvocationName -eq '.') { return }
+
+$Root = Resolve-InstallRoot $Root
 if ($Uninstall) { Invoke-Uninstall } else { Invoke-Install }
