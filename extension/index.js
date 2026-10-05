@@ -25,7 +25,7 @@ const path = require('node:path');
 const { LightshowClient } = require('./lightshow-client.js');
 const { runCommand, normaliseControls, DEFAULT_CONTROLS } = require('./commands.js');
 const { createHttpHandler } = require('./http.js');
-const { BeatClock } = require('../shared/beat-clock.js');
+const { BeatClock, clampBpm } = require('../shared/beat-clock.js');
 
 const BUNDLE = 'party-visuals';
 // How often the beat position is re-published while connected: graphics run
@@ -86,9 +86,18 @@ module.exports = function partyVisuals(nodecg) {
   client.on('look', (look) => {
     // Only a reading that arrived now moves the clock: a palette patch
     // carries no news about the beat, and the mirror's beat is old by then.
-    const tempo = look.changed.includes('clock') || look.changed.includes('bpm');
-    if (tempo && look.bpm !== null) {
-      clock.update({ bpm: look.bpm, beat: look.beat, epoch: look.epoch, atMs: Date.now() });
+    // The beat position rides on `clock`; a patch to the typed bpm alone is
+    // a tempo change only while no clock tempo is in force (an old
+    // lightshow), and never a fresh position.
+    const fresh = look.changed.includes('clock');
+    const tempo = look.bpm !== null && (fresh || clampBpm(look.bpm) !== clock.bpm);
+    if (tempo) {
+      clock.update({
+        bpm: look.bpm,
+        beat: fresh ? look.beat : null,
+        epoch: fresh ? look.epoch : null,
+        atMs: Date.now(),
+      });
     }
     set(R.bpm, look.bpm);
     set(R.clockSource, look.clockSource);

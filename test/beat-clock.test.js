@@ -62,6 +62,17 @@ test('the lightshow\'s own epoch change re-anchors even for a small difference',
   near(clock.at(1000), 1.9);
 });
 
+test('locked follows the latest reading: a tempo without a beat position is the clock\'s own phase again', () => {
+  const clock = new BeatClock();
+  clock.update({ bpm: 120, beat: 4, atMs: 0 });
+  assert.equal(clock.locked, true);
+  assert.equal(clock.update({ bpm: 124, atMs: 1000 }), 'tempo');
+  assert.equal(clock.locked, false, 'the lightshow stopped sending a beat position');
+  near(clock.at(1000), 6, 1e-9, 'the position itself is kept');
+  clock.update({ bpm: 124, beat: 6.1, atMs: 1000 });
+  assert.equal(clock.locked, true);
+});
+
 test('a time before the anchor reads as the anchor, not earlier', () => {
   const clock = new BeatClock();
   clock.update({ bpm: 120, beat: 8, atMs: 1000 });

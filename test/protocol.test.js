@@ -30,7 +30,9 @@ test('the clock tempo wins over the typed bpm, and the typed bpm shows when ther
 });
 
 test('a beat position and an epoch are read when the lightshow sends them', () => {
-  const look = readLook({ ...baseState(), clock: { source: 'auto', bpm: 128, beatPos: 64.5, epoch: 3 } });
+  // `at`, the lightshow's wall clock at the reading, rides along and is not read.
+  const look = readLook({ ...baseState(), clock: { source: 'auto', bpm: 128, beatPos: 64.5, epoch: 3, at: 1_760_000_000_000 } });
+  assert.deepEqual(Object.keys(look).sort(), ['beat', 'bpm', 'clockSource', 'epoch', 'palette', 'paletteOverride']);
   assert.equal(look.beat, 64.5);
   assert.equal(look.epoch, 3);
   assert.equal(look.clockSource, 'auto');

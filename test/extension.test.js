@@ -127,6 +127,39 @@ test('a phase-locked lightshow sets the beat position', async (t) => {
   assert.ok(beat >= 32 && beat < 32 + (Date.now() - at + 2000) * 128 / 60000, `beat ${beat}`);
 });
 
+test('a patch that changes only the typed bpm does not re-feed the mirror\'s old beat position', async (t) => {
+  const show = await startMockLightshow({ token: TOKEN, state: { clock: { source: 'cdj', bpm: 128, beatPos: 32, epoch: 0, at: Date.now() } } });
+  t.after(() => show.close());
+  const { value } = start(t, show);
+  await until(() => value('connection').status === 'connected' && value('beatPos').locked, 4000, 'locked');
+  // Let the clock run well past the snapshot's position: at 128 bpm, 700 ms is 1.5 beats.
+  await new Promise((r) => setTimeout(r, 700));
+  const published = Date.now();
+  show.publish({ bpm: 128.5 });
+  // A tempo patch re-publishes the beat position at once; the clock's own
+  // tempo still wins over the typed one, so the bpm replicant stays at 128.
+  await until(() => value('beatPos').at >= published, 2000, 'the beat position after the patch');
+  await new Promise((r) => setTimeout(r, 100));
+  const beat = value('beatPos');
+  assert.equal(value('bpm'), 128);
+  assert.equal(beat.epoch, 0, 'the stale position from the snapshot was not taken as a jump');
+  assert.ok(beat.beat > 33, `the clock carried on from where it was, not back to 32: ${beat.beat}`);
+  assert.equal(beat.locked, true);
+});
+
+test('a lightshow without a clock drives the tempo from its typed bpm', async (t) => {
+  const show = await startMockLightshow({ token: TOKEN, state: { clock: undefined } });
+  t.after(() => show.close());
+  const { value } = start(t, show);
+  await until(() => value('connection').status === 'connected' && value('bpm') === 120, 4000, 'connected');
+  assert.equal(value('clockSource'), null);
+  show.publish({ bpm: 100 });
+  await until(() => value('beatPos').bpm === 100, 2000, 'the new tempo on the clock');
+  assert.equal(value('bpm'), 100);
+  assert.equal(value('beatPos').locked, false);
+  assert.equal(value('beatPos').epoch, 0, 'a tempo change is not a jump');
+});
+
 test('commands from the dashboard and from other bundles change the controls', async (t) => {
   const show = await startMockLightshow({ token: TOKEN });
   t.after(() => show.close());

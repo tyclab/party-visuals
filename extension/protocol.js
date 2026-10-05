@@ -85,7 +85,10 @@ const positive = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? 
  *   bpm              the clock's tempo, else the operator's typed bpm
  *   clockSource      what the clock is locked to (auto, cdj, track, live, tap)
  *   beat, epoch      the clock's beat position and discontinuity count, when
- *                    the lightshow sends them; null otherwise
+ *                    the lightshow sends them; null otherwise. A `clock.at`
+ *                    (the lightshow's wall clock at the reading) is left
+ *                    alone: it is another machine's clock, and the constant
+ *                    lag it would correct is what graphics.offsetMs is for
  *   palette          the look's colours as hex: its four slots, which name
  *                    entries of the colour preset catalogue, deduplicated
  *   paletteOverride  the override's colours as hex, null when there is none

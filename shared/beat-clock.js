@@ -81,9 +81,11 @@
       const here = this.at(atMs);
       this.anchor = { beat: here, atMs, bpm: tempo };
       this.correction = null;
+      // The latest reading says whether the phase is the lightshow's: one
+      // without a beat position leaves the position alone but the lock is gone.
+      this.locked = hasBeat;
       if (!hasBeat) return 'tempo';
 
-      this.locked = true;
       const sourceJumped = epoch !== null && this.sourceEpoch !== null && epoch !== this.sourceEpoch;
       this.sourceEpoch = epoch;
       const error = beat - here;
