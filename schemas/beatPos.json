@@ -1,0 +1,15 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema",
+  "title": "The beat position at a moment; graphics extrapolate from it",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["beat", "bpm", "at", "epoch", "locked"],
+  "properties": {
+    "beat": { "type": "number", "description": "Beats, continuous." },
+    "bpm": { "type": "number", "minimum": 0 },
+    "at": { "type": "number", "description": "When the beat was there, in ms since 1970 (the extension's clock); 0 before the first reading." },
+    "epoch": { "type": "integer", "minimum": 0, "description": "Moves on at every jump (a seek, a new track)." },
+    "locked": { "type": "boolean", "description": "Whether the phase came from the lightshow (true) or is the extension's own, at the lightshow's tempo (false)." }
+  },
+  "default": { "beat": 0, "bpm": 120, "at": 0, "epoch": 0, "locked": false }
+}

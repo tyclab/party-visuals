@@ -1,0 +1,23 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema",
+  "title": "The graphics' switches",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["wash", "bar"],
+  "definitions": {
+    "graphic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["on", "intensity"],
+      "properties": {
+        "on": { "type": "boolean" },
+        "intensity": { "type": "integer", "minimum": 0, "maximum": 100, "description": "Percent." }
+      }
+    }
+  },
+  "properties": {
+    "wash": { "$ref": "#/definitions/graphic" },
+    "bar": { "$ref": "#/definitions/graphic" }
+  },
+  "default": { "wash": { "on": true, "intensity": 50 }, "bar": { "on": true, "intensity": 80 } }
+}

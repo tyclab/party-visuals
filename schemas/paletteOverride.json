@@ -1,0 +1,8 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema",
+  "title": "The lightshow's palette override, as a screen shows it; null when there is none",
+  "type": ["array", "null"],
+  "maxItems": 8,
+  "items": { "type": "string", "pattern": "^#[0-9A-F]{6}$" },
+  "default": null
+}

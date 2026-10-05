@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema",
+  "title": "The link to the lightshow",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["status", "via", "since", "lastUpdate", "error", "retryInMs", "target"],
+  "properties": {
+    "status": { "enum": ["connecting", "connected", "reconnecting", "error", "stopped"] },
+    "via": { "enum": ["socket", "http", null], "description": "Socket.IO, or polling GET /api/state while the socket is down." },
+    "since": { "type": ["number", "null"], "description": "Connected since, ms since 1970." },
+    "lastUpdate": { "type": ["number", "null"], "description": "The last data from the lightshow, ms since 1970." },
+    "error": { "type": ["string", "null"] },
+    "retryInMs": { "type": ["integer", "null"], "description": "The wait before the next socket attempt." },
+    "target": { "type": ["string", "null"], "description": "The lightshow's address, without credentials." }
+  },
+  "default": { "status": "connecting", "via": null, "since": null, "lastUpdate": null, "error": null, "retryInMs": null, "target": null }
+}

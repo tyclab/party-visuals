@@ -1,0 +1,69 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema",
+  "title": "party-visuals bundle config (cfg/party-visuals.json)",
+  "description": "NodeCG serves this config to every page of the bundle, so it holds no secret: the lightshow token lives in the file lightshow.tokenFile names.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "lightshow": {
+      "type": "object",
+      "additionalProperties": false,
+      "default": {},
+      "properties": {
+        "url": {
+          "type": "string",
+          "default": "http://127.0.0.1:3000",
+          "description": "The lightshow server: http(s)://host:port, with no token or credentials in it."
+        },
+        "tokenFile": {
+          "type": "string",
+          "default": "",
+          "description": "A file holding the lightshow's access token and nothing else, read by the extension only. Relative to the folder NodeCG runs from. Empty: the lightshow has no token (a loopback bind)."
+        },
+        "pollMs": {
+          "type": "integer",
+          "minimum": 250,
+          "maximum": 10000,
+          "default": 1000,
+          "description": "How often GET /api/state is polled while the socket is down."
+        },
+        "reconnect": {
+          "type": "object",
+          "additionalProperties": false,
+          "default": {},
+          "properties": {
+            "minMs": { "type": "integer", "minimum": 50, "maximum": 60000, "default": 500, "description": "The first wait before reconnecting." },
+            "maxMs": { "type": "integer", "minimum": 50, "maximum": 300000, "default": 15000, "description": "The longest wait: the doubling stops here." }
+          }
+        }
+      }
+    },
+    "graphics": {
+      "type": "object",
+      "additionalProperties": false,
+      "default": {},
+      "properties": {
+        "maxFps": {
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 60,
+          "default": 30,
+          "description": "The most frames a second a graphic draws."
+        },
+        "offsetMs": {
+          "type": "integer",
+          "minimum": -1000,
+          "maximum": 1000,
+          "default": 0,
+          "description": "Shift the graphics' beat: positive draws it earlier, to make up for a projector's or OBS's delay. Judge it on the real screen."
+        }
+      }
+    },
+    "allowHosts": {
+      "type": "array",
+      "items": { "type": "string" },
+      "default": [],
+      "description": "Host names the api/ addresses answer to besides IP addresses, localhost and *.local (Companion calling this machine by name)."
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema",
+  "title": "What the lightshow's clock follows: auto, cdj, track, live or tap",
+  "type": ["string", "null"],
+  "default": null
+}
