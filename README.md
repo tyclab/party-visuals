@@ -54,6 +54,81 @@ in that installation's `cfg/` folder.
 The dashboard (<http://127.0.0.1:9090/>) gets a **Party visuals** panel next to
 EclipseGraphics' panels.
 
+## Install on the show PC
+
+[`install/`](install) has what a Windows PC that runs OBS and Companion for the show
+needs:
+
+| File | |
+|---|---|
+| [`Install-PartyVisuals.ps1`](install/Install-PartyVisuals.ps1) | Installs EclipseGraphics and this bundle at pinned commits, keeps NodeCG to this machine, stores the lightshow token and, with `-Autostart`, starts NodeCG at logon. Windows PowerShell 5.1 or PowerShell 7. |
+| [`obs-scene-collection.json`](install/obs-scene-collection.json) | The OBS scene collection **Party Visuals**: the wash and the bar as 1920 × 1080 browser sources. |
+| [`companion-page.md`](install/companion-page.md) | A Companion page with the lightshow's buttons and the visuals' side by side. |
+
+From a normal (not elevated) PowerShell window, as the Windows user who runs the show:
+
+```
+git clone https://github.com/tyclab/party-visuals
+cd party-visuals\install
+powershell -ExecutionPolicy Bypass -File .\Install-PartyVisuals.ps1 -LightshowUrl http://<lightshow host>:3000 -Autostart -WhatIf
+powershell -ExecutionPolicy Bypass -File .\Install-PartyVisuals.ps1 -LightshowUrl http://<lightshow host>:3000 -Autostart
+Start-ScheduledTask -TaskName 'PartyVisuals NodeCG'
+```
+
+The run with `-WhatIf` lists what would change and changes nothing. The run without it
+asks for the lightshow's token (its **Settings → Server & access**; the input is
+hidden). Then the dashboard, <http://127.0.0.1:9090/>, shows the **Party visuals**
+panel and its link to the lightshow.
+
+What the script does:
+
+1. Checks for Node.js 22 or later and git. Without them it prints the command that
+   installs them (`winget install --id OpenJS.NodeJS.LTS --exact`,
+   `winget install --id Git.Git --exact`) and stops.
+2. Clones EclipseGraphics into `%LOCALAPPDATA%\PartyVisuals\EclipseGraphics` (`-Root`
+   for another folder) and runs `npm ci` with install scripts off. Only better-sqlite3,
+   NodeCG's database driver, then runs its own: it fetches or builds the native module
+   NodeCG cannot start without. With npm 11.16 or later that one allowance is a line in
+   the checkout's `.npmrc`.
+3. Clones this bundle into its `bundles\party-visuals` and runs `npm ci --omit=dev`.
+4. Writes `cfg\nodecg.json` (NodeCG on 127.0.0.1:9090) and `cfg\party-visuals.json`
+   (the lightshow's address, the token file, and `graphics.offsetMs` at 0 for the
+   beamer), keeping any other setting already in them.
+5. Writes the token to `cfg\party-visuals.token`, readable by this Windows user only
+   (inheritance off, one rule). It is not shown, logged or put on a command line.
+6. With `-Autostart`, registers the scheduled task **PartyVisuals NodeCG**, which runs
+   EclipseGraphics' `start.js` at this user's logon in a console window; closing the
+   window stops NodeCG.
+
+It can be run again: what is in place is kept, and the packages are installed again
+only when a lockfile or the Node.js major version changed. `-NewToken` asks for the token again,
+`-LightshowUrl` changes the address, `-EclipseGraphicsCommit` and `-BundleRef` (a commit,
+or a `vX.Y.Z` tag) move the pins, and `-Uninstall` removes the task and the folder.
+NodeCG reads its configuration and the token when it starts, so restart it after a
+change. `Get-Help .\Install-PartyVisuals.ps1 -Detailed` has the rest.
+
+By hand on the show PC:
+
+- **OBS:** Scene Collection → Import → `install\obs-scene-collection.json`, then pick
+  the **Party Visuals** collection from the Scene Collection menu. The sources are
+  1920 × 1080 at the top left; on another base canvas (Settings → Video) fit each one to
+  the screen (Ctrl+F). EclipseGraphics' overlay, when it is used, goes between the wash
+  and the bar. Put the scene on the beamer the way the show does it, e.g. a fullscreen
+  projector on the beamer's display.
+- **Companion:** build the page from [`companion-page.md`](install/companion-page.md);
+  Companion's page export has no stable format to import.
+- **The beamer:** judged on the real screen: `graphics.offsetMs` in
+  `cfg\party-visuals.json` (restart NodeCG after a change), the intensities (wash 50 and
+  bar 80 by default, from the panel or Companion), and a look at the wash's pulse for
+  photosensitivity.
+
+NodeCG listens on 127.0.0.1 only, so OBS and Companion run on the show PC too. The show
+PC reaches the lightshow at its port 3000, which the lightshow's host has to admit from
+the show PC's address; that is set up on the lightshow's host, not by this script. The
+address's host name has to be one the lightshow answers to (its machine name, an IP
+address, or its **Public URL**), or the lightshow answers 403 and the panel says so
+([The network](#the-network)).
+
 ## Configuration
 
 `cfg/party-visuals.json` (all optional; [`configschema.json`](configschema.json)
