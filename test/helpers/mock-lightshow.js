@@ -56,9 +56,11 @@ function listen(server, port) {
 
 /**
  * Start a mock lightshow. `socket: false` serves only HTTP, so a Socket.IO
- * client fails its handshake and has to fall back to polling.
+ * client fails its handshake and has to fall back to polling. `refuseHost`
+ * answers every request as the lightshow does one for a host name it is not
+ * known by: 403, plain text, before the token is even looked at.
  */
-async function startMockLightshow({ token = 'mock-token', port = 0, socket = true, state = {} } = {}) {
+async function startMockLightshow({ token = 'mock-token', port = 0, socket = true, state = {}, refuseHost = false } = {}) {
   const live = { ...baseState(), ...state };
   const versions = { look: 0, rig: 0, show: 0, sources: 0, catalogs: 0, system: 0 };
   const seen = { stateRequests: 0, stateTokens: [], handshakes: [], syncs: 0 };
@@ -67,6 +69,11 @@ async function startMockLightshow({ token = 'mock-token', port = 0, socket = tru
     if (req.url.split('?')[0] === '/api/state') {
       seen.stateRequests++;
       seen.stateTokens.push(req.headers['x-lightshow-token'] || '');
+      if (refuseHost) {
+        res.writeHead(403, { 'content-type': 'text/plain' });
+        res.end('Host "mock" is not one this server answers to.');
+        return;
+      }
       if (token && req.headers['x-lightshow-token'] !== token) {
         res.writeHead(401, { 'content-type': 'application/json' });
         res.end(JSON.stringify({ ok: false, error: 'Missing or invalid token.' }));

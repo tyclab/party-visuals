@@ -146,7 +146,7 @@ Written by the extension; graphics and panels read them.
 | `clockSource` | What the lightshow's clock follows: `auto`, `cdj`, `track`, `live` or `tap`. |
 | `palette` | The look's colours as `#RRGGBB`, white, amber and UV mixed in as the lightshow's own swatches show them. Kept across restarts. |
 | `paletteOverride` | The lightshow's palette override as `#RRGGBB`, or null (also when the lightshow does not send one). |
-| `connection` | `{status, via, since, lastUpdate, error, retryInMs, target}`; `status` is `connecting`, `connected`, `reconnecting` or `error`, `via` is `socket` or `http`. Never the token. |
+| `connection` | `{status, via, since, lastUpdate, error, retryInMs, target}`; `status` is `connecting`, `connected`, `reconnecting`, `error` or `stopped` (NodeCG shutting down), `via` is `socket` or `http`. Never the token. |
 | `controls` | `{wash: {on, intensity}, bar: {on, intensity}}`. Kept across restarts. |
 
 Each has its JSON schema in `schemas/`.
@@ -163,7 +163,9 @@ catalogue, and `paletteOverride` when there is one. It sends nothing else.
 While the socket is down it polls `GET /api/state` (the token in the `X-Lightshow-Token`
 header), so the tempo and colours get through a proxy that will not carry the socket.
 Reconnecting is its own, with the backoff above, and goes on after a refused token, so a
-token fixed on the lightshow's side is picked up without restarting NodeCG.
+token fixed on the lightshow's side is picked up without restarting NodeCG. A refused
+poll (401: the token; 403: a host name the lightshow does not answer to) is not repeated
+every second: the next socket attempt polls once more if it fails.
 
 A lightshow that sends no beat position (the clock's `{source, bpm}` alone) still drives
 the graphics at its tempo; the phase is then the extension's own, shared by every graphic.

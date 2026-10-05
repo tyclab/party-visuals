@@ -148,6 +148,8 @@ class LightshowClient extends EventEmitter {
         // socket is enough to notice when the token is accepted again.
         this.refused = `the lightshow refused the token: ${this._clean(err.message)}`;
       } else {
+        // A transport failure, or the handshake refused for the host name:
+        // one poll tells which, and the poll stops again if it is refused.
         this.refused = null;
         this.socketError = `cannot reach the lightshow's socket: ${this._clean(err && err.message)}`;
         this._startPolling();
@@ -225,11 +227,17 @@ class LightshowClient extends EventEmitter {
       const headers = { accept: 'application/json' };
       if (this.#token) headers['x-lightshow-token'] = this.#token;
       const res = await this.fetch(`${this.target.display}/api/state`, { headers, signal: abort.signal });
-      if (res.status === 401 || res.status === 403) {
+      if (res.status === 401) {
         // An unread body holds the connection open until it is collected.
         await res.body?.cancel();
         this.httpUp = false;
-        this.refused = `the lightshow refused the token (HTTP ${res.status})`;
+        this.refused = 'the lightshow refused the token (HTTP 401)';
+      } else if (res.status === 403) {
+        // The lightshow answers 403 before it looks at the token: to a host
+        // name it is not known by, or to a browser's cross-origin request.
+        await res.body?.cancel();
+        this.httpUp = false;
+        this.refused = 'the lightshow refused the request (HTTP 403): it does not answer to this host name; set it as its Public URL';
       } else if (!res.ok) {
         await res.body?.cancel();
         this.httpUp = false;
@@ -254,6 +262,9 @@ class LightshowClient extends EventEmitter {
     }
     if (this.stopped || this.socketUp) return;
     this._update();
+    // A refusal will not change by asking again every second; the socket's
+    // next attempt, at its backoff, polls once more if it fails.
+    if (this.refused) return;
     this.pollTimer = setTimeout(() => {
       this.pollTimer = null;
       this._poll();

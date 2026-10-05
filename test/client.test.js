@@ -149,6 +149,33 @@ test('falls back to GET /api/state when the socket cannot connect', async (t) =>
   assert.ok(!JSON.stringify(statuses).includes(TOKEN));
 });
 
+test('a poll the lightshow refuses is not repeated every second, and a refused host is named as such', async (t) => {
+  // A wrong token, and no socket: the first poll is refused with 401.
+  const show = await startMockLightshow({ token: 'the-real-token', socket: false });
+  const { client, statuses } = makeClient(show.url, { token: TOKEN, pollMs: 50, backoff: { minMs: 2000, maxMs: 2000, jitter: 0 } });
+  t.after(async () => { client.stop(); await show.close(); });
+  client.start();
+  const refused = await waitFor(client, 'status', (s) => s.status === 'error');
+  assert.match(refused.error, /token/i);
+  const polls = show.seen.stateRequests;
+  assert.equal(polls, 1);
+  // Ten poll intervals later nothing has asked again: the socket's retry will.
+  await new Promise((r) => setTimeout(r, 500));
+  assert.equal(show.seen.stateRequests, polls, 'the refused poll was not repeated');
+  assert.ok(!JSON.stringify(statuses).includes(TOKEN));
+
+  // The lightshow refuses a host name it is not known by with 403, which is
+  // not a token problem and says so.
+  const strict = await startMockLightshow({ token: TOKEN, socket: false, refuseHost: true });
+  const other = makeClient(strict.url, { pollMs: 50 });
+  t.after(async () => { other.client.stop(); await strict.close(); });
+  other.client.start();
+  const host = await waitFor(other.client, 'status', (s) => s.status === 'error');
+  assert.match(host.error, /HTTP 403/);
+  assert.match(host.error, /Public URL/);
+  assert.doesNotMatch(host.error, /token/i);
+});
+
 test('an address carrying credentials, or none at all, is refused before anything is sent', async (t) => {
   for (const url of ['', 'not a url', 'ftp://127.0.0.1:3000', 'http://127.0.0.1:9/?token=abc', 'http://user:pw@127.0.0.1:9/']) {
     const client = new LightshowClient({ url, token: TOKEN });
