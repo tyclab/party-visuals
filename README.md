@@ -92,8 +92,9 @@ What the script does:
    the checkout's `.npmrc`.
 3. Clones this bundle into its `bundles\party-visuals` and runs `npm ci --omit=dev`.
 4. Writes `cfg\nodecg.json` (NodeCG on 127.0.0.1:9090) and `cfg\party-visuals.json`
-   (the lightshow's address, the token file, and `graphics.offsetMs` at 0 for the
-   beamer), keeping any other setting already in them.
+   (the lightshow's address and the token file; a new one also gets `graphics.offsetMs`
+   at 0 for the beamer), keeping any other setting already in them, a tuned `offsetMs`
+   included.
 5. Writes the token to `cfg\party-visuals.token`, readable by this Windows user only
    (inheritance off, one rule). It is not shown, logged or put on a command line.
 6. With `-Autostart`, registers the scheduled task **PartyVisuals NodeCG**, which runs
@@ -103,9 +104,15 @@ What the script does:
 It can be run again: what is in place is kept, and the packages are installed again
 only when a lockfile or the Node.js major version changed. `-NewToken` asks for the token again,
 `-LightshowUrl` changes the address, `-EclipseGraphicsCommit` and `-BundleRef` (a commit,
-or a `vX.Y.Z` tag) move the pins, and `-Uninstall` removes the task and the folder.
+or a `vX.Y.Z` tag) move the pins, and `-Uninstall` removes the task and the folder, only
+a folder the script set up (its marker file in it) and not one reached through a link.
 NodeCG reads its configuration and the token when it starts, so restart it after a
-change. `Get-Help .\Install-PartyVisuals.ps1 -Detailed` has the rest.
+change. The rest is in the script's help, read with the execution policy bypassed as
+for the run (a plain `Get-Help` finds nothing while the policy blocks scripts):
+
+```
+powershell -ExecutionPolicy Bypass -Command "Get-Help .\Install-PartyVisuals.ps1 -Detailed"
+```
 
 By hand on the show PC:
 
@@ -254,6 +261,10 @@ npm test
 
 The tests run against a local mock of the lightshow's Socket.IO server; nothing leaves the
 machine. `shared/` is loaded both by the extension and, as plain scripts, by the graphics.
+
+On Windows, `powershell -NoProfile -ExecutionPolicy Bypass -File test\install.test.ps1`
+checks the install script in a folder under `%TEMP%`: the token file, the configuration
+merges and the install folder checks. It installs nothing and registers no task.
 
 ## Licence
 

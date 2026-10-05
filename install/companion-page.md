@@ -20,8 +20,9 @@ another machine cannot reach it.
 
 With that base URL every visuals button is a **GET** action whose URI is
 `<target>/<command>`, e.g. `wash/air.toggle`. A refused command (HTTP 400) turns the
-`visuals` connection red and its log gives the reason. The buttons send and do not
-light up with the state; the **Party visuals** panel in NodeCG's dashboard
+`visuals` connection red; its log has only the response code, and the same address
+opened in a browser shows the reason (`{"ok": false, "error": …}`). The buttons send
+and do not light up with the state; the **Party visuals** panel in NodeCG's dashboard
 (<http://127.0.0.1:9090/>) shows what is on.
 
 ## Page
