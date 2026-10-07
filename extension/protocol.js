@@ -1,18 +1,6 @@
 'use strict';
-/**
- * The lightshow's live state, kept in step with its protocol 2:
- *
- *   snapshot  { protocol: 2, versions: { <domain>: n }, state }, on connect
- *             and on request (`sync`)
- *   patch     { d: domain, v: version, set: { key: value }, del?: [key] },
- *             each domain counting its own versions; a patch that is not the
- *             next for its domain means one was missed, and the whole state
- *             is asked for again rather than drifting
- *   state     the original protocol's whole state, sent to a client that did
- *             not ask for protocol 2; GET /api/state returns the same shape
- *
- * Read-only: nothing here sends anything to the lightshow but `sync`.
- */
+// Mirror protocol 2 snapshots and versioned patches; request sync after a version gap.
+// Legacy snapshots and HTTP polls have no versions. This client only sends sync.
 const { paletteFrom } = require('../shared/palette.js');
 
 // The keys the graphics read. A patch touching none of them is applied but
@@ -80,19 +68,7 @@ function withoutDmx(state) {
 
 const positive = (v) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : null);
 
-/**
- * What the graphics need from the lightshow's state:
- *   bpm              the clock's tempo, else the operator's typed bpm
- *   clockSource      what the clock is locked to (auto, cdj, track, live, tap)
- *   beat, epoch      the clock's beat position and discontinuity count, when
- *                    the lightshow sends them; null otherwise. A `clock.at`
- *                    (the lightshow's wall clock at the reading) is left
- *                    alone: it is another machine's clock, and the constant
- *                    lag it would correct is what graphics.offsetMs is for
- *   palette          the look's colours as hex: its four slots, which name
- *                    entries of the colour preset catalogue, deduplicated
- *   paletteOverride  the override's colours as hex, null when there is none
- */
+// Read clock and colour slots; ignore the remote wall clock because graphics.offsetMs handles fixed latency.
 function readLook(state) {
   const clock = state && typeof state.clock === 'object' && state.clock !== null ? state.clock : {};
   const slots = ['colorA', 'colorB', 'colorC', 'colorD'].map((k) => state[k]);

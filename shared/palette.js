@@ -1,15 +1,5 @@
-/**
- * The lightshow's colours as screen colours.
- *
- * The rig's colours have white, amber and UV emitters besides red, green and
- * blue. On a screen they are approximated the way the lightshow's own swatches
- * do it: amber adds a warm orange, UV a blue-violet, white lifts all three,
- * and a sum past full scale is scaled back as a whole so the hue survives
- * (Warm White and Cool White stay apart instead of both turning flat white).
- *
- * Loaded by the extension (CommonJS) and by the graphics (a plain script that
- * adds to `PartyVisuals`).
- */
+// Match the lightshow screen mix of RGB, white, amber and UV; scale overflow to preserve hue.
+// Shared by CommonJS consumers and browser PartyVisuals.
 (function (root, factory) {
   const api = factory();
   if (typeof module === 'object' && module.exports) module.exports = api;
@@ -20,8 +10,7 @@
   // The lightshow's palettes hold at most eight colours.
   const MAX_COLOURS = 8;
 
-  // Shown when the lightshow has never sent a palette: magenta, cyan, a deep
-  // blue and amber, a look that reads as "party" on any screen.
+  // Fallback until the lightshow sends a palette.
   const DEFAULT_PALETTE = Object.freeze(['#FF0096', '#00E1FF', '#4B00FF', '#FF9C00']);
 
   const HEX = /^#([0-9a-f]{6})([0-9a-f]{2})?$/i;
@@ -77,10 +66,7 @@
     return out.length ? out : null;
   }
 
-  /**
-   * What the graphics paint with: the lightshow's palette override when it
-   * has one, else the look's colours, else the default. Never empty.
-   */
+  /** Override, look colours, or fallback; never empty. */
   function effectivePalette({ override, palette }) {
     const fromOverride = paletteFrom(override);
     if (fromOverride) return { colours: fromOverride, source: 'override' };

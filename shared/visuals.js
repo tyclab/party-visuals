@@ -1,15 +1,4 @@
-/**
- * The beat as the graphics show it: a pulse on each beat, never more than
- * five a second, and a calm, still picture whenever the lightshow is gone.
- *
- * Five flashes a second is the party plan's photosensitivity limit, the same
- * one the lightshow holds its strobe to. At 300 bpm a pulse a beat is exactly
- * that; faster tempos pulse every second (or fourth) beat, and a gap of 200 ms
- * between two pulses holds whatever the beat position does.
- *
- * Loaded by the tests (CommonJS) and by the graphics (a plain script that adds
- * to `PartyVisuals`).
- */
+// Enforce at most five pulses/second with a 200 ms gap; fade and stop motion on disconnection.
 (function (root, factory) {
   const api = factory();
   if (typeof module === 'object' && module.exports) module.exports = api;

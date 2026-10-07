@@ -1,25 +1,6 @@
 'use strict';
-/**
- * party-visuals: the lightshow's beat and colours for OBS graphics.
- *
- * The extension is the only part that talks to the lightshow. It reads the
- * address and the token file from the bundle config, follows the lightshow
- * read-only, and publishes what the graphics need as Replicants:
- *
- *   bpm              the tempo, or null before the lightshow has sent one
- *   beatPos          { beat, bpm, at, epoch, locked }: the beat position at
- *                    `at` (ms since 1970); graphics extrapolate from it
- *   clockSource      what the lightshow's clock follows (auto, cdj, track, live, tap)
- *   palette          the look's colours as #RRGGBB, kept across restarts
- *   paletteOverride  the lightshow's palette override as #RRGGBB, or null
- *   connection       { status, via, since, lastUpdate, error, retryInMs, target }
- *   controls         { wash: { on, intensity }, bar: { on, intensity } },
- *                    kept across restarts
- *
- * The token never reaches a Replicant, a page or the log: NodeCG hands the
- * bundle config to every page of the bundle, so the config names a file and
- * only this process reads it.
- */
+// Follow the lightshow read-only and publish beat/colour Replicants for graphics.
+// Read the token only here; never expose it through bundle config, Replicants or logs.
 const fs = require('node:fs');
 const path = require('node:path');
 const { LightshowClient } = require('./lightshow-client.js');

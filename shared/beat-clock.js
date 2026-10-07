@@ -1,17 +1,5 @@
-/**
- * Where the music is, in beats, between the lightshow's readings.
- *
- * The lightshow sends its tempo whenever it changes and, where it knows one,
- * a beat position. Graphics draw at their own frame rate, so between two
- * readings the position is extrapolated at the last tempo. A new reading
- * re-bases the clock where it has got to, so a tempo change carries on from
- * the same place at the new rate rather than jumping. A beat position close to
- * the extrapolated one is worked in gradually; one far from it (a seek, a new
- * track, another source taking over) is taken at once.
- *
- * Loaded by the extension (CommonJS) and by the graphics (a plain script that
- * adds `PartyVisuals.BeatClock`).
- */
+// Extrapolate beats at the last tempo; slew small phase errors, jump on discontinuities.
+// Shared by CommonJS consumers and browser PartyVisuals.BeatClock.
 (function (root, factory) {
   const api = factory();
   if (typeof module === 'object' && module.exports) module.exports = api;

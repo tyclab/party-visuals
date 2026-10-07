@@ -3,11 +3,7 @@
 // Below this a retry loop only burns CPU and fills the lightshow's log.
 const FLOOR_MS = 50;
 
-/**
- * Waits between reconnection attempts: doubling from `minMs` up to `maxMs`,
- * each shortened by up to `jitter` of itself at random so several clients do
- * not retry in step. `reset()` after a success starts again from the minimum.
- */
+/** Exponential backoff capped at maxMs, with random shortening to stagger clients; reset after success. */
 class Backoff {
   constructor({ minMs = 500, maxMs = 15000, factor = 2, jitter = 0.2, random = Math.random } = {}) {
     this.minMs = Math.max(FLOOR_MS, Number.isFinite(minMs) ? minMs : 500);
