@@ -1,11 +1,17 @@
 # party-visuals
 
-Party graphics for OBS that keep time with the lightshow
+Local party display controls and browser graphics that keep time with the lightshow
 ([artnet-lightshow](https://github.com/tyclab/artnet-lightshow)). A
 [NodeCG](https://www.nodecg.dev) 2 bundle that runs in the same NodeCG as
 [EclipseGraphics](https://github.com/LightD31/EclipseGraphics): EclipseGraphics draws the
 cards, lower thirds and tickers, this bundle draws what moves with the music behind and
 around them.
+
+The show PC displays Music Assistant's native MilkDrop visualizer in fullscreen
+Chrome. The browser launcher waits for the Q90A, uses a dedicated persistent
+profile and follows the existing Companion visual on/off controls. OBS is not
+part of this workflow. The wash and bar below remain available as optional local
+graphics.
 
 - **Colour wash** (`graphics/wash.html`): the whole frame in the lightshow's palette, to
   sit under EclipseGraphics' cards. The colours turn and flow with the beat; each beat
@@ -60,14 +66,12 @@ EclipseGraphics' panels.
 
 ## Install on the show PC
 
-[`install/`](install) has what a Windows PC that runs OBS and Companion for the show
-needs:
+[`install/`](install) provides the Windows browser, NodeCG and Companion setup:
 
 | File | |
 |---|---|
 | [`Install-PartyVisuals.ps1`](install/Install-PartyVisuals.ps1) | Installs EclipseGraphics and this bundle at pinned commits, keeps NodeCG to this machine, stores the lightshow token and, with `-Autostart`, starts NodeCG at logon. Windows PowerShell 5.1 or PowerShell 7. |
-| [`Start-PartyVisualsOBS.ps1`](install/Start-PartyVisualsOBS.ps1) | Optional OBS task action: waits for both local graphics, opens the selected collection/profile in the desktop, and avoids a second OBS process. |
-| [`obs-scene-collection.json`](install/obs-scene-collection.json) | The OBS scene collection **Party Visuals**: the wash and the bar as 1920 × 1080 browser sources. |
+| [`Start-PartyVisualsBrowser.ps1`](install/Start-PartyVisualsBrowser.ps1) | Starts a dedicated fullscreen Chrome display on the active Q90A and supervises the local browser helper. Waits while the TV is absent. |
 | [`companion-page.md`](install/companion-page.md) | A Companion page with the lightshow's buttons and the visuals' side by side. |
 
 From a normal (not elevated) PowerShell window, as the Windows user who runs the show:
@@ -121,40 +125,41 @@ for the run (a plain `Get-Help` finds nothing while the policy blocks scripts):
 powershell -ExecutionPolicy Bypass -Command "Get-Help .\Install-PartyVisuals.ps1 -Detailed"
 ```
 
-By hand on the show PC:
+For the native Music Assistant visualizer, install Chrome and copy
+[`tools/browser-visuals`](https://github.com/tyclab/artnet-lightshow/tree/main/tools/browser-visuals)
+from the matching ArtNet Lightshow release to
+`%LOCALAPPDATA%\PartyVisuals\browser-visuals`, then run `npm.cmd ci --omit=dev`
+in that folder. Copy `Start-PartyVisualsBrowser.ps1` into the local startup folder.
+The default player URL selects SHD; configure `-VisualizerUrl` for another player.
+Sign in to Music Assistant once in the dedicated browser profile.
 
-- **OBS:** Scene Collection → Import → `install\obs-scene-collection.json`, then pick
-  the **Party Visuals** collection from the Scene Collection menu. The sources are
-  1920 × 1080 at the top left; on another base canvas (Settings → Video) fit each one to
-  the screen (Ctrl+F). EclipseGraphics' overlay, when it is used, goes between the wash
-  and the bar. Put the scene on the beamer the way the show does it, e.g. a fullscreen
-  projector on the beamer's display.
-- **Companion:** build the page from [`companion-page.md`](install/companion-page.md);
-  Companion's page export has no stable format to import.
-- **The beamer:** judged on the real screen: `graphics.offsetMs` in
-  `cfg\party-visuals.json` (restart NodeCG after a change), the intensities (wash 50 and
-  bar 80 by default, from the panel or Companion), and a look at the wash's pulse for
-  photosensitivity.
+Register one **PartyVisuals Browser** task at the intended user's interactive
+logon, running Windows PowerShell with arguments
+`-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "<launcher path>"`.
+Use limited privileges, ignore duplicate starts, remove the execution time limit,
+start when available and retry failures every minute. Replace the former OBS
+startup task after validating the browser setup.
 
-For OBS login startup, copy `Start-PartyVisualsOBS.ps1` to a stable local folder and
-create one Task Scheduler task for the show user's logon, **Run only when user is
-logged on**, with a 30-second delay. Run Windows PowerShell with arguments
-`-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "<launcher path>" -Profile "<existing profile name>"`.
-The default collection and scene are **Party Visuals**. Set **Start in** to the
-launcher's folder, ignore new instances, remove the execution time limit, and enable
-restart on failure every minute. Check for an existing OBS Startup shortcut or task
-before adding one.
+The launcher identifies the Q90A by hardware ID `SAM7140` and waits until Windows
+exposes it as an active desktop. It uses its current bounds, including negative
+coordinates, and hides its own browser window if the TV disconnects. It does not
+move the mouse or send keys. Chrome uses a dedicated persistent profile and an
+ephemeral loopback debugging port; the helper accesses only the configured Music
+Assistant player page. Normal app launch may receive Windows focus.
 
-The helper waits up to five minutes for both graphics to answer locally; a timeout
-fails the task so its retry can handle a slow NodeCG startup. OBS starts minimized
-with its executable folder as its working directory, without output-start flags.
-The helper keeps running until OBS exits and passes its exit code to Task Scheduler.
-It preserves saved projectors. OBS stores their display numbers, so verify the target
-with the intended display enabled before saving a fullscreen projector; a missing
-display must not be replaced with another monitor. OBS 32 can prompt after an unclean
-shutdown, which still needs a desktop response before a normal launch continues.
+The helper hides the album artwork, timeline and tint while retaining Music
+Assistant's native visualizer. Existing Companion **VISUALS OFF/ON** buttons use
+NodeCG's `wash.on` switch to cover or reveal it; `all/air.off` and `all/air.on`
+already control that switch. Remove the former OBS actions and unused OBS
+connection. Wash/bar intensity remains specific to those optional graphics.
 
-NodeCG listens on 127.0.0.1 only, so OBS and Companion run on the show PC too. The show
+The browser workflow runs without a lightshow output connection by default.
+Optional `-Curtain` uses the separately deployed guarded pixel-input feature;
+it never arms the rig. Follow the ArtNet helper documentation before enabling it.
+The browser's own Music Assistant audio path determines visualizer timing;
+`graphics.offsetMs` applies only to this bundle's wash/bar graphics.
+
+NodeCG listens on 127.0.0.1 only, so the browser helper and Companion run on the show PC too. The show
 PC reaches the lightshow at its port 3000, which the lightshow's host has to admit from
 the show PC's address; that is set up on the lightshow's host, not by this script. The
 address's host name has to be one the lightshow answers to (its machine name, an IP
@@ -206,9 +211,9 @@ recorded with the deployment, not in this repository. The lightshow also refuses
 names it does not know: reaching it by a name other than its machine name needs that name
 as its **Public URL** (Settings → Server & access).
 
-## OBS
+## Optional local graphics
 
-One browser source per graphic, 1920 × 1080:
+Each graphic can be opened directly in a browser at 1920 × 1080:
 
 | Source | URL |
 |---|---|
@@ -264,8 +269,12 @@ Each has its JSON schema in `schemas/`.
 flowchart LR
   Logon[Windows user logon] --> NodeTask[NodeCG task]
   NodeTask --> Mirror
-  Logon --> OBSLauncher[OBS task waits for local graphics]
-  OBSLauncher --> OBS
+  Logon --> BrowserTask[Browser task waits for active Q90A]
+  BrowserTask --> Browser[Fullscreen Music Assistant browser]
+  Music[Music Assistant PCM] --> Browser
+  BrowserTask --> Helper[Local browser helper]
+  Replicants -->|Visual on/off| Helper
+  Helper -->|Display visibility| Browser
   Lightshow[ArtNet Lightshow] -->|Socket.IO snapshot / patch| Mirror[Extension state mirror]
   Lightshow -->|HTTP poll while socket is down| Mirror
   Mirror -->|Fresh clock readings| Clock[Beat extrapolation]
@@ -274,7 +283,7 @@ flowchart LR
   Colours --> Replicants
   Replicants --> Fresh[NodeCG connected and beat update under 2 seconds old]
   Fresh --> Graphics[Wash and bar graphics]
-  Graphics --> OBS[OBS browser sources]
+  Graphics --> Optional[Optional browser graphics]
   Controls[Dashboard / Companion] -->|Bundle commands| Replicants
 ```
 
@@ -334,7 +343,7 @@ machine. `shared/` is loaded both by the extension and, as plain scripts, by the
 On Windows, `powershell -NoProfile -ExecutionPolicy Bypass -File test\install.test.ps1`
 checks the install script in a folder under `%TEMP%`: the token file, the configuration
 merges and the install folder checks. It installs nothing and registers no task.
-`test\obs-start.test.ps1` checks the OBS launcher with mocked HTTP and process calls.
+`test\browser-start.test.ps1` checks display identity, process ownership and browser/helper recovery with mocked Windows calls.
 
 ## Licence
 
