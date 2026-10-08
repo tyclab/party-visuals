@@ -1,6 +1,7 @@
 'use strict';
 // Follow the lightshow read-only and publish beat/colour Replicants for graphics.
-// Read the token only here; never expose it through bundle config, Replicants or logs.
+// NodeCG hands the bundle config to every bundle page, so the config names a token file only this process reads.
+// Never expose the token through bundle config, Replicants or logs.
 const fs = require('node:fs');
 const path = require('node:path');
 const { LightshowClient } = require('./lightshow-client.js');

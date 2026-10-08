@@ -1,6 +1,7 @@
 'use strict';
 // Bundle command/state endpoints: apply NodeCG authentication, origin checks and a host allowlist.
 // These checks prevent cross-site commands and DNS rebinding; clients without Origin remain supported.
+// GET api/cmd/<target>/<cmd> (Companion Generic HTTP), POST api/cmd { target, cmd }, GET api/state.
 const net = require('node:net');
 
 const MAX_BODY = 16 * 1024;

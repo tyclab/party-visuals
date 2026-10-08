@@ -17,7 +17,8 @@ around them.
 Both are 1920 × 1080 with a transparent background, take the lightshow's palette (its
 palette override when it has one, else the look's colours), and:
 
-- **never pulse faster than 5 Hz**: up to 300 bpm a pulse a beat,
+- **never pulse faster than 5 Hz**, the photosensitivity limit the lightshow holds its own
+  strobe to: up to 300 bpm a pulse a beat,
   above that every second or fourth beat, and at
   least 200 ms between two pulses whatever the beat position does;
 - **draw at most `graphics.maxFps` frames a second** (30 by default);

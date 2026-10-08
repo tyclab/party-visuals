@@ -1,4 +1,5 @@
-// Enforce at most five pulses/second with a 200 ms gap; fade and stop motion on disconnection.
+// At most five pulses a second, 200 ms apart: the party plan's photosensitivity limit, the lightshow's strobe cap too.
+// Fade and stop motion on disconnection.
 (function (root, factory) {
   const api = factory();
   if (typeof module === 'object' && module.exports) module.exports = api;
