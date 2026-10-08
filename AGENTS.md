@@ -7,8 +7,10 @@ for OBS. README.md documents installation, configuration and integration.
   by design. The limit applies to code and configuration files.
 - Outside the limit (operator, 2026-10-08): vendored third-party code and
   third-party build output (kept byte-identical to upstream), Hugo site
-  functional files, translation files, and approved runtime text such as MCP
-  tool docstrings. Output of our own generators is inside it: fix the generator.
+  functional files, translation files, example/template configs whose comments
+  document the schema, files under ten code lines, and approved runtime text
+  such as MCP tool docstrings. Output of our own generators is inside it: fix
+  the generator.
 - Keep comment-only lines at or below 20% of nonblank lines per code/config file.
   Exceptions require explicit operator approval recording path, reason and scope;
   none are granted here. Preserve legal notices, tool directives and runtime help
