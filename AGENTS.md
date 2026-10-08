@@ -1,7 +1,7 @@
 # Repository instructions
 
 This NodeCG 2 bundle follows ArtNet Lightshow and renders beat/colour graphics
-for OBS. README.md documents installation, configuration and integration.
+for browser displays. README.md documents installation, configuration and integration.
 
 - README files and agent instruction files are exempt from the comment limit
   by design. The limit applies to code and configuration files.
