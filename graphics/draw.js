@@ -36,17 +36,20 @@
     const limiter = new PV.FrameLimiter(feed.maxFps);
     const beat = new PV.BeatVisual();
     const shown = new PV.Ease(400, 0);
+    const energy = new PV.Ease(250, 0);
 
     function tick(now) {
       requestAnimationFrame(tick);
       if (!limiter.ready(now)) return;
       const s = feed.read(now);
       const control = s.controls[name] || { on: false, intensity: 0 };
-      const f = beat.frame({ nowMs: now, beat: s.beat, bpm: s.bpm, live: s.live });
+      const f = beat.frame({ nowMs: now, beat: s.beat, bpm: s.bpm, live: s.live, audio: s.audio });
+      const musicEnergy = energy.step(s.live && s.audio ? s.audio.energy : 0, now);
       const level = shown.step(control.on ? 1 : 0, now) * control.intensity / 100;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       if (level <= 0.001) return;
-      paint(ctx, { level, pulse: f.pulse, motion: f.motion, live: f.live, palette: s.palette, width: canvas.width, height: canvas.height });
+      paint(ctx, { level, pulse: f.pulse, motion: f.motion, live: f.live, energy: musicEnergy,
+        palette: s.palette, width: canvas.width, height: canvas.height });
     }
 
     feed.ready.then(() => requestAnimationFrame(tick));

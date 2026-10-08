@@ -1,0 +1,18 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": ["object", "null"],
+  "default": null,
+  "additionalProperties": false,
+  "required": ["at", "t", "eventT", "beat", "section", "energy", "bass", "mid", "high"],
+  "properties": {
+    "at": { "type": "number", "minimum": 0 },
+    "t": { "type": "number", "minimum": 0 },
+    "eventT": { "type": ["number", "null"], "minimum": 0 },
+    "beat": { "enum": ["loud", "soft", "quiet", null] },
+    "section": { "enum": ["loud", "soft", "quiet", null] },
+    "energy": { "type": "number", "minimum": 0, "maximum": 1 },
+    "bass": { "type": "number", "minimum": 0, "maximum": 1 },
+    "mid": { "type": "number", "minimum": 0, "maximum": 1 },
+    "high": { "type": "number", "minimum": 0, "maximum": 1 }
+  }
+}

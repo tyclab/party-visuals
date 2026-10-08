@@ -75,11 +75,24 @@
       this.lastOnsetMs = -Infinity;
       this.lastPulse = 0;
       this.motion = 0;
+      this.audioT = null;
+      this.audioEventT = null;
+      this.pulseGain = 1;
     }
 
-    frame({ nowMs, beat, bpm, live }) {
+    frame({ nowMs, beat, bpm, live, audio = null }) {
       const liveMix = this.fade.step(live ? 1 : 0, nowMs);
       let onset = false;
+      let audioOnset = false;
+      if (live && audio) {
+        audioOnset = this.audioT !== null && audio.t >= this.audioT
+          && this.audioEventT !== null && audio.eventT !== null && audio.eventT !== this.audioEventT
+          && audio.beat === 'loud';
+        this.audioT = audio.t;
+        this.audioEventT = audio.eventT;
+      } else {
+        this.audioT = this.audioEventT = null;
+      }
       if (live && Number.isFinite(beat)) {
         this.motion = beat;
         const div = pulseDivisor(bpm, this.maxHz);
@@ -87,19 +100,21 @@
         if (this.index === null || index < this.index) {
           // The first frame, or the music jumped back: no pulse for that.
           this.index = index;
-        } else if (index > this.index && nowMs - this.lastOnsetMs >= this.minGapMs) {
+        } else if ((index > this.index || audioOnset) && nowMs - this.lastOnsetMs >= this.minGapMs) {
           // A crossing that comes too soon waits for the gap rather than
           // being dropped, so a tempo right at the limit loses no beats.
           this.index = index;
           this.lastOnsetMs = nowMs;
           const periodMs = div * 60000 / Math.max(1, bpm);
           this.decayMs = Math.max(50, Math.min(250, periodMs * 0.3));
+          // The lamps spike on loud classifications only; a tempo pulse follows the music's energy.
+          this.pulseGain = audio && !audioOnset ? 0.3 + 0.5 * audio.energy : 1;
           onset = true;
         }
       } else {
         this.index = null;
       }
-      let pulse = this.envelope(nowMs) * liveMix;
+      let pulse = this.envelope(nowMs) * liveMix * this.pulseGain;
       // While calming down nothing may brighten, not even an attack in progress.
       if (!live) pulse = Math.min(pulse, this.lastPulse);
       this.lastPulse = pulse;

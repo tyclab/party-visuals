@@ -65,6 +65,23 @@ function start(t, show, over = {}) {
   return { ...fake, api, value };
 }
 
+test('the extension subscribes read-only to shared audio and resets it when the source disconnects', async (t) => {
+  const show = await startMockLightshow({ token: TOKEN, state: { audio: { mode: 'reactive' } } });
+  let closed = false;
+  t.after(async () => { if (!closed) await show.close(); });
+  const { value } = start(t, show);
+  await until(() => show.seen.subscriptions.length > 0);
+  assert.deepEqual(show.seen.subscriptions[0], ['audio']);
+  show.audio({ t: 10, party: { bass: 0.8, mid: 0.3, high: 0.1 },
+    spl: { eventT: 9, level: 60, beat: 'loud', section: 'loud' } });
+  await until(() => value('audio')?.t === 10);
+  assert.equal(value('audio').energy, 0.6);
+  assert.equal(value('audioMode'), 'reactive');
+  assert.ok(value('audio').at > 0);
+  await show.close(); closed = true;
+  await until(() => value('audio') === null);
+});
+
 test('the extension mirrors the lightshow into replicants and keeps the token out of them', async (t) => {
   const show = await startMockLightshow({ token: TOKEN });
   t.after(() => show.close());

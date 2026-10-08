@@ -1,12 +1,12 @@
 'use strict';
 // Mirror protocol 2 snapshots and versioned patches; request sync after a version gap.
-// Legacy snapshots and HTTP polls have no versions. This client only sends sync.
+// Legacy snapshots and HTTP polls have no versions; subscriptions remain read-only.
 const { paletteFrom, paletteBodyFrom } = require('../shared/palette.js');
 
 // The keys the graphics read. A patch touching none of them is applied but
 // not reported, so a moving progress bar elsewhere does not re-base the beat.
 const LOOK_KEYS = new Set(['bpm', 'clock', 'colorA', 'colorB', 'colorC', 'colorD',
-  'basePalette', 'overridePalette', 'paletteOverride', 'colorPresets']);
+  'basePalette', 'overridePalette', 'paletteOverride', 'colorPresets', 'audio']);
 
 class StateMirror {
   constructor() {
@@ -78,6 +78,7 @@ function readLook(state) {
     clockSource: typeof clock.source === 'string' ? clock.source : null,
     beat: typeof clock.beatPos === 'number' && Number.isFinite(clock.beatPos) ? clock.beatPos : null,
     epoch: Number.isInteger(clock.epoch) ? clock.epoch : null,
+    audioMode: ['off', 'tempo', 'reactive'].includes(state.audio?.mode) ? state.audio.mode : null,
     palette: paletteBodyFrom(state.basePalette, slots, state.colorPresets) ?? paletteFrom(slots, state.colorPresets),
     paletteOverride: state.overridePalette === null ? null
       : paletteBodyFrom(state.overridePalette, state.paletteOverride ?? []) ?? paletteFrom(state.paletteOverride),

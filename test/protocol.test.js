@@ -14,6 +14,7 @@ test('a snapshot gives the tempo, the clock source and the look colours as hex',
     clockSource: 'tap',
     beat: null,
     epoch: null,
+    audioMode: null,
     // Magenta, Cyan, Congo Blue, Moonlight (white mixed in and scaled back,
     // as the lightshow's own swatches show it)
     palette: ['#FF0096', '#00E1FF', '#4B00FF', '#80AEFF'],
@@ -32,11 +33,21 @@ test('the clock tempo wins over the typed bpm, and the typed bpm shows when ther
 test('a beat position and an epoch are read when the lightshow sends them', () => {
   // `at`, the lightshow's wall clock at the reading, rides along and is not read.
   const look = readLook({ ...baseState(), clock: { source: 'auto', bpm: 128, beatPos: 64.5, epoch: 3, at: 1_760_000_000_000 } });
-  assert.deepEqual(Object.keys(look).sort(), ['beat', 'bpm', 'clockSource', 'epoch', 'palette', 'paletteOverride']);
+  assert.deepEqual(Object.keys(look).sort(), ['audioMode', 'beat', 'bpm', 'clockSource', 'epoch', 'palette', 'paletteOverride']);
   assert.equal(look.beat, 64.5);
   assert.equal(look.epoch, 3);
   assert.equal(look.clockSource, 'auto');
   assert.equal(readLook({ ...baseState(), clock: { source: 'auto', bpm: 128, beatPos: 'x' } }).beat, null);
+});
+
+test('reactive mode changes are published without inventing a clock reading', () => {
+  const mirror = new StateMirror();
+  mirror.applySnapshot(snapshot({ ...baseState(), clock: { bpm: 120, beatPos: 3, epoch: 1 } }));
+  assert.equal(mirror.applyPatch({ d: 'system', v: 1, set: { audio: { mode: 'reactive' } } }), 'ok');
+  assert.equal(mirror.touchedLook(), true);
+  assert.equal(mirror.lastChanged.has('clock'), false);
+  assert.equal(readLook(mirror.state).audioMode, 'reactive');
+  assert.equal(readLook({ ...mirror.state, audio: { mode: 'bad' } }).audioMode, null);
 });
 
 test('a look of one colour on all four slots is one colour', () => {

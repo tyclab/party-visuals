@@ -22,6 +22,7 @@
 const { EventEmitter } = require('node:events');
 const { StateMirror, readLook } = require('./protocol.js');
 const { Backoff } = require('./backoff.js');
+const { audioFrame } = require('../shared/audio.js');
 
 const PROTOCOL = 2;
 
@@ -130,8 +131,10 @@ class LightshowClient extends EventEmitter {
       this.backoff.reset();
       clearTimeout(this.pollTimer);
       this.pollTimer = null;
+      socket.emit('subscribe', ['audio']);
       this._update();
     });
+    socket.on('audio', (feed) => this.emit('audio', audioFrame(feed)));
     socket.on('snapshot', (snapshot) => {
       if (this.mirror.applySnapshot(snapshot)) this._received();
     });

@@ -39,6 +39,8 @@ module.exports = function partyVisuals(nodecg) {
     clockSource: replicant('clockSource', null),
     palette: replicant('palette', [], true),
     paletteOverride: replicant('paletteOverride', null),
+    audio: replicant('audio', null),
+    audioMode: replicant('audioMode', null),
     connection: replicant('connection', {
       status: 'connecting', via: null, since: null, lastUpdate: null, error: null, retryInMs: null, target: null,
     }),
@@ -86,12 +88,15 @@ module.exports = function partyVisuals(nodecg) {
     // No colours sent (an old lightshow, a catalogue missing): keep the last.
     if (look.palette) set(R.palette, look.palette);
     set(R.paletteOverride, look.paletteOverride);
+    set(R.audioMode, look.audioMode);
     if (tempo) publishBeat();
   });
+  client.on('audio', (frame) => set(R.audio, frame ? { ...frame, at: Date.now() } : null));
 
   let lastLogged = '';
   client.on('status', (status) => {
     set(R.connection, status);
+    if (status.status !== 'connected' || status.via !== 'socket') set(R.audio, null);
     const line = `${status.status}${status.via ? ` via ${status.via}` : ''}${status.error ? `: ${status.error}` : ''}`;
     if (line === lastLogged) return;
     lastLogged = line;
@@ -130,6 +135,8 @@ module.exports = function partyVisuals(nodecg) {
     clockSource: R.clockSource.value,
     palette: R.palette.value,
     paletteOverride: R.paletteOverride.value,
+    audio: R.audio.value,
+    audioMode: R.audioMode.value,
   });
 
   const router = nodecg.Router();
