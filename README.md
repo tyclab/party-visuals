@@ -18,7 +18,8 @@ Both are 1920 × 1080 with a transparent background, take the lightshow's palett
 palette override when it has one, else the look's colours), and:
 
 - **never pulse faster than 5 Hz**, the photosensitivity limit the lightshow holds its own
-  strobe to: up to 300 bpm a pulse a beat, above that every second or fourth beat, and at
+  strobe to: up to 300 bpm a pulse a beat,
+  above that every second or fourth beat, and at
   least 200 ms between two pulses whatever the beat position does;
 - **draw at most `graphics.maxFps` frames a second** (30 by default);
 - **go calm when the lightshow is gone**: no new pulse, the glow fades within a second,
@@ -235,6 +236,17 @@ Each has its JSON schema in `schemas/`.
 
 ## How it follows the lightshow
 
+```mermaid
+flowchart LR
+  Lightshow[ArtNet Lightshow] -->|Socket.IO snapshot / patch| Mirror[Extension state mirror]
+  Lightshow -->|HTTP poll while socket is down| Mirror
+  Mirror --> Clock[Beat extrapolation and palette]
+  Clock --> Replicants[NodeCG Replicants]
+  Replicants --> Graphics[Wash and bar graphics]
+  Graphics --> OBS[OBS browser sources]
+  Controls[Dashboard / Companion] -->|Bundle commands| Replicants
+```
+
 The extension is a read-only client of the lightshow server. It connects over Socket.IO
 asking for protocol 2 (`auth: {token, protocol: 2}`), takes the snapshot, then applies
 the patches, each domain's version in order; a missed patch makes it ask for the whole
@@ -253,6 +265,8 @@ A lightshow that sends no beat position (the clock's `{source, bpm}` alone) stil
 the graphics at its tempo; the phase is then the extension's own, shared by every graphic.
 
 ## Development
+
+Repository contribution rules and comment-limit approvals live in [AGENTS.md](AGENTS.md).
 
 ```
 npm install

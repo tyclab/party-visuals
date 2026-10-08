@@ -1,8 +1,4 @@
-/**
- * Drawing helpers shared by the party graphics, and the loop that runs one:
- * a frame only when the frame-rate cap allows, the switch on and off eased
- * so a graphic never pops in or out in one frame.
- */
+// Shared drawing loop: cap frame rate and ease visibility changes.
 (function () {
   'use strict';
   const PV = window.PartyVisuals;

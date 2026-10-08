@@ -1,11 +1,9 @@
 node_modules/
 
-# NodeCG's own files, when it runs from this folder: its configuration (the
-# lightshow address and token file), database, assets and logs
 cfg/
 db/
 assets/
 logs/
 
-# a lightshow token kept next to the bundle by mistake
+# Never commit access tokens.
 *.token

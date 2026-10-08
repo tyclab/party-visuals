@@ -1,18 +1,7 @@
 'use strict';
-/**
- * The bundle's HTTP addresses, under /bundles/party-visuals/ (NodeCG's login
- * applies when it is on):
- *
- *   GET  api/cmd/<target>/<cmd>   a command, for Companion's Generic HTTP
- *   POST api/cmd                  { target, cmd }
- *   GET  api/state                switches, connection, tempo and palette
- *
- * A command changes what is on air, so it is refused when a browser says it
- * comes from another site, and every api/ address answers only to IP
- * addresses, localhost, *.local and the configured `allowHosts` names, which
- * keeps a page that re-points its own name at this machine (DNS rebinding)
- * out. Companion and curl send no Origin and are not affected.
- */
+// Bundle command/state endpoints: apply NodeCG authentication, origin checks and a host allowlist.
+// These checks prevent cross-site commands and DNS rebinding; clients without Origin remain supported.
+// GET api/cmd/<target>/<cmd> (Companion Generic HTTP), POST api/cmd { target, cmd }, GET api/state.
 const net = require('node:net');
 
 const MAX_BODY = 16 * 1024;
