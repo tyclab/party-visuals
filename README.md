@@ -22,9 +22,12 @@ palette override when it has one, else the look's colours), and:
   above that every second or fourth beat, and at
   least 200 ms between two pulses whatever the beat position does;
 - **draw at most `graphics.maxFps` frames a second** (30 by default);
-- **go calm when the lightshow is gone**: no new pulse, the glow fades within a second,
-  the motion stops where it was and the last colours stay. Nothing strobes while the link
-  is down, and the beat eases back in when it returns.
+- **go calm when the lightshow or NodeCG link is gone**: no new pulse, the glow fades
+  within a second, the motion stops where it was and the last colours stay. Graphics
+  require a connected NodeCG socket, a connected lightshow and a beat update less than
+  two seconds old. A lost NodeCG socket stops new pulses immediately; missing beat
+  updates stop them after two seconds. Reconnecting waits for a fresh beat update and
+  eases the beat back in.
 
 The beat comes from the lightshow, not from a tap here. Between the lightshow's readings
 the extension and every graphic extrapolate the beat at the last tempo, so the pictures
@@ -269,7 +272,8 @@ flowchart LR
   Mirror -->|Base / override palette| Colours[Emitter mix and gradient stop colours]
   Clock --> Replicants[NodeCG Replicants]
   Colours --> Replicants
-  Replicants --> Graphics[Wash and bar graphics]
+  Replicants --> Fresh[NodeCG connected and beat update under 2 seconds old]
+  Fresh --> Graphics[Wash and bar graphics]
   Graphics --> OBS[OBS browser sources]
   Controls[Dashboard / Companion] -->|Bundle commands| Replicants
 ```
