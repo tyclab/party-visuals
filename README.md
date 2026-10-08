@@ -227,7 +227,7 @@ Written by the extension; graphics and panels read them.
 | `bpm` | The lightshow's tempo (its clock's, else the typed one); null before it has sent one. |
 | `beatPos` | `{beat, bpm, at, epoch, locked}`: the beat position at time `at` (ms since 1970), re-published twice a second while connected; graphics extrapolate from it. `locked` says whether the phase came from the lightshow or is the extension's own. |
 | `clockSource` | What the lightshow's clock follows: `auto`, `cdj`, `track`, `live` or `tap`. |
-| `palette` | The look's colours as `#RRGGBB`, white, amber and UV mixed in as the lightshow's own swatches show them. Kept across restarts. |
+| `palette` | The base look's screen colours as `#RRGGBB`, white, amber and UV mixed in as the lightshow's own swatches show them; selected gradients use the stop-colour approximation below. Kept across restarts. |
 | `paletteOverride` | The lightshow's palette override as `#RRGGBB`, or null (also when the lightshow does not send one). |
 | `connection` | `{status, via, since, lastUpdate, error, retryInMs, target}`; `status` is `connecting`, `connected`, `reconnecting`, `error` or `stopped` (NodeCG shutting down), `via` is `socket` or `http`. Never the token. |
 | `controls` | `{wash: {on, intensity}, bar: {on, intensity}}`. Kept across restarts. |
@@ -240,8 +240,10 @@ Each has its JSON schema in `schemas/`.
 flowchart LR
   Lightshow[ArtNet Lightshow] -->|Socket.IO snapshot / patch| Mirror[Extension state mirror]
   Lightshow -->|HTTP poll while socket is down| Mirror
-  Mirror --> Clock[Beat extrapolation and palette]
+  Mirror -->|Fresh clock readings| Clock[Beat extrapolation]
+  Mirror -->|Base / override palette| Colours[Emitter mix and gradient stop colours]
   Clock --> Replicants[NodeCG Replicants]
+  Colours --> Replicants
   Replicants --> Graphics[Wash and bar graphics]
   Graphics --> OBS[OBS browser sources]
   Controls[Dashboard / Companion] -->|Bundle commands| Replicants
@@ -251,8 +253,32 @@ The extension is a read-only client of the lightshow server. It connects over So
 asking for protocol 2 (`auth: {token, protocol: 2}`), takes the snapshot, then applies
 the patches, each domain's version in order; a missed patch makes it ask for the whole
 state again (`sync`). It reads `bpm`, `clock` (`source`, `bpm`, and `beatPos` and `epoch`
-when the lightshow sends them), the look's four colour slots through the colour-preset
-catalogue, and `paletteOverride` when there is one. It sends nothing else.
+when the lightshow sends them), `basePalette` and `overridePalette`. Older servers use
+the four colour slots through the colour-preset catalogue and `paletteOverride`.
+The three palette fields belong to the `look` domain; catalogue/library changes alone
+do not refresh the beat. Palette-only and typed-bpm-only patches never reuse an old
+`clock.beatPos` as a new clock reading. The extension sends nothing except `sync`.
+
+Palette compatibility is checked against ArtNet Lightshow
+[`2b539dc`](https://github.com/tyclab/artnet-lightshow/commit/2b539dc546757cb7f740817321eb7a56e0e88f44).
+Hex colours accept `#RGB`, `#RRGGBB`, `#RRGGBBWW`, `#RRGGBBWWAA` and
+`#RRGGBBWWAAUU`; the trailing bytes are emitters, never transparency. White adds to
+all three screen channels, amber adds red and half as much green, and UV appears as
+visible violet (20% red, 90% blue). Overflow is scaled proportionally, matching the
+engine's swatches; a screen does not emit UV. New palette bodies take precedence;
+clearing `overridePalette` restores the base colours. Stage random slots are resolved
+by the engine before publication. An unresolved random marker uses its corresponding
+legacy slot when available and is otherwise omitted; graphics never roll their own
+random colours on refresh or reconnect.
+
+**Gradient approximation:** the selected named gradient, or the selected gradient-set
+role, supplies its stop colours in authored order (slot references and literal colours
+both work). As in the engine, selection defaults to the first gradient. At most eight
+distinct colours are retained in first-appearance order. The wash uses its existing
+moving RGB blend and the bar uses its existing scrolling colour blocks. Stop positions,
+RGB/OKLCH/step interpolation, wrap settings and repeated-stop spacing are not reproduced;
+this follows the selected gradient's colours, not its authored spatial appearance.
+Without a usable gradient, the palette's colours are used directly.
 
 While the socket is down it polls `GET /api/state` (the token in the `X-Lightshow-Token`
 header), so the tempo and colours get through a proxy that will not carry the socket.

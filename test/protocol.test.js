@@ -98,3 +98,39 @@ test('patches report which keys they changed', () => {
   mirror.applyPatch({ d: 'look', v: 4, set: { colorA: 0 }, del: ['paletteOverride'] });
   assert.deepEqual([...mirror.lastChanged].sort(), ['colorA', 'paletteOverride']);
 });
+
+test('new palette bodies take precedence, and clearing them restores the legacy base slots', () => {
+  const state = { ...baseState(), basePalette: { colours: ['#000000FF', '#00000000FF'] },
+    overridePalette: { colours: ['#0000000000FF'] }, paletteOverride: ['#ff0000'] };
+  assert.deepEqual(readLook(state).palette, ['#FFFFFF', '#FF8000']);
+  assert.deepEqual(readLook(state).paletteOverride, ['#3300E6']);
+  assert.equal(readLook({ ...state, overridePalette: null }).paletteOverride, null, 'an explicit clear wins over a stale legacy override');
+  assert.deepEqual(readLook({ ...state, basePalette: null }).palette, readLook(baseState()).palette);
+  assert.deepEqual(readLook({ ...state, overridePalette: undefined }).paletteOverride, ['#FF0000']);
+});
+
+test('unresolved random slots follow their legacy values without shifting slot indices', () => {
+  const state = { ...baseState(), basePalette: { colours: [{ random: true }, '#f00', 'random'] },
+    overridePalette: { colours: [{ random: true }, '#00000000ff'] }, paletteOverride: ['#000000ff', '#f00'] };
+  assert.deepEqual(readLook(state).palette, ['#FF0096', '#FF0000', '#4B00FF']);
+  assert.deepEqual(readLook(state).paletteOverride, ['#FFFFFF', '#FF8000']);
+});
+
+test('base and override patches touch the look; palette catalogue changes do not replay the clock', () => {
+  const mirror = new StateMirror();
+  mirror.applySnapshot(snapshot());
+  assert.equal(mirror.applyPatch({ d: 'look', v: 4, set: { basePalette: { colours: ['#00000000ff'] } } }), 'ok');
+  assert.equal(mirror.touchedLook(), true);
+  assert.deepEqual(readLook(mirror.state).palette, ['#FF8000']);
+  assert.equal(mirror.lastChanged.has('clock'), false);
+  assert.equal(mirror.applyPatch({ d: 'look', v: 5, set: { overridePalette: { colours: ['#0000000000ff'] } } }), 'ok');
+  assert.equal(mirror.touchedLook(), true);
+  assert.deepEqual(readLook(mirror.state).paletteOverride, ['#3300E6']);
+  assert.equal(mirror.applyPatch({ d: 'catalogs', v: 2, set: { builtinPalettes: [] } }), 'ok');
+  assert.equal(mirror.touchedLook(), false);
+  assert.equal(mirror.applyPatch({ d: 'library', v: 1, set: { userPalettes: [] } }), 'ok');
+  assert.equal(mirror.touchedLook(), false);
+  assert.equal(mirror.applyPatch({ d: 'look', v: 6, del: ['overridePalette'] }), 'ok');
+  assert.equal(mirror.touchedLook(), true);
+  assert.equal(readLook(mirror.state).paletteOverride, null);
+});

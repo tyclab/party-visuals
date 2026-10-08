@@ -160,6 +160,30 @@ test('a lightshow without a clock drives the tempo from its typed bpm', async (t
   assert.equal(value('beatPos').epoch, 0, 'a tempo change is not a jump');
 });
 
+test('new palette look patches update the graphics without reanchoring the stale clock', async (t) => {
+  const show = await startMockLightshow({ token: TOKEN, state: {
+    clock: { source: 'cdj', bpm: 120, beatPos: 32, epoch: 7, at: 4000 },
+    basePalette: { colours: ['#000000FF'] }, overridePalette: null,
+  } });
+  t.after(() => show.close());
+  const { value } = start(t, show);
+  await until(() => value('beatPos').locked && value('palette')[0] === '#FFFFFF', 4000, 'snapshot');
+  await new Promise((r) => setTimeout(r, 1100));
+  const before = structuredClone(value('beatPos'));
+  show.publish({ basePalette: { colours: ['#00000000FF'] }, overridePalette: { colours: ['#0000000000FF'] } });
+  await until(() => value('paletteOverride')?.[0] === '#3300E6', 2000, 'palette patch');
+  assert.deepEqual(value('palette'), ['#FF8000']);
+  await until(() => value('beatPos').at > before.at, 2000, 'beat refresh');
+  const after = value('beatPos');
+  const expected = before.beat + (after.at - before.at) * 120 / 60000;
+  assert.ok(Math.abs(after.beat - expected) < 0.01, `beat continued from ${before.beat} to ${after.beat}`);
+  assert.equal(after.epoch, before.epoch);
+  assert.equal(after.locked, true);
+  show.publish({ overridePalette: null, paletteOverride: null });
+  await until(() => value('paletteOverride') === null, 2000, 'override clear');
+  assert.deepEqual(value('palette'), ['#FF8000']);
+});
+
 test('commands from the dashboard and from other bundles change the controls', async (t) => {
   const show = await startMockLightshow({ token: TOKEN });
   t.after(() => show.close());

@@ -13,7 +13,7 @@
   // Fallback until the lightshow sends a palette.
   const DEFAULT_PALETTE = Object.freeze(['#FF0096', '#00E1FF', '#4B00FF', '#FF9C00']);
 
-  const HEX = /^#([0-9a-f]{6})([0-9a-f]{2})?$/i;
+  const HEX = /^#(?:[0-9a-f]{3}|[0-9a-f]{6}|[0-9a-f]{8}|[0-9a-f]{10}|[0-9a-f]{12})$/i;
 
   const byte = (v) => (Number.isFinite(v) ? Math.max(0, Math.min(255, v)) : 0);
   const hex2 = (v) => Math.round(v).toString(16).padStart(2, '0').toUpperCase();
@@ -31,18 +31,16 @@
     return `#${hex2(rr)}${hex2(gg)}${hex2(bb)}`;
   }
 
-  /**
-   * One colour as `#RRGGBB`, or null. Takes the lightshow's hex (`#RRGGBB`,
-   * or `#RRGGBBWW` with a white channel), a colour object, or an index into
-   * its colour presets (how the look's four slots are sent).
-   */
+  // Extra hex bytes are white, amber and UV emitters, never alpha.
   function toHex(value, presets) {
     if (typeof value === 'string') {
-      const m = HEX.exec(value.trim());
-      if (!m) return null;
-      const n = parseInt(m[1], 16);
-      const w = m[2] ? parseInt(m[2], 16) : 0;
-      return mixToHex({ r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255, w });
+      const hex = value.trim();
+      if (!HEX.test(hex)) return null;
+      const raw = hex.slice(1);
+      const digits = raw.length === 3 ? [...raw].map((d) => d + d).join('') : raw;
+      const values = ['r', 'g', 'b', 'w', 'a', 'uv'].map((channel, i) =>
+        [channel, parseInt(digits.slice(i * 2, i * 2 + 2), 16) || 0]);
+      return mixToHex(Object.fromEntries(values));
     }
     if (Number.isInteger(value)) {
       const preset = Array.isArray(presets) ? presets[value] : undefined;
@@ -66,6 +64,29 @@
     return out.length ? out : null;
   }
 
+  function paletteBodyFrom(body, fallback = [], presets) {
+    if (!body || !Array.isArray(body.colours)) return null;
+    // Stage random slots arrive materialized. Never invent new random colours on refresh.
+    const colours = body.colours.map((entry, i) => {
+      const random = entry === 'random' || (entry && entry.random === true);
+      return toHex(random ? fallback[i % fallback.length] : entry, presets);
+    });
+    const gradients = Array.isArray(body.gradients) ? body.gradients : [];
+    const set = Array.isArray(body.sets) ? body.sets.find((s) => s && s.name === body.gradientSet) : null;
+    const roles = set && Array.isArray(set.roles) ? set.roles : [];
+    const role = Number.isInteger(body.gradientRole) && body.gradientRole >= 0 ? body.gradientRole : 0;
+    const chosen = roles.length ? roles[role % roles.length] : body.gradient;
+    const gradient = gradients.find((g) => g && g.name === chosen) || gradients[0];
+    if (gradient && Array.isArray(gradient.stops)) {
+      // Wash/bar use an ordered colour strip: authored positions, space and wrap are approximated.
+      const stops = gradient.stops.map((s) => s && (Number.isInteger(s.slot) && s.slot >= 0
+        ? colours[s.slot % colours.length] : s.colour));
+      const fromStops = paletteFrom(stops);
+      if (fromStops) return fromStops;
+    }
+    return paletteFrom(colours);
+  }
+
   /** Override, look colours, or fallback; never empty. */
   function effectivePalette({ override, palette }) {
     const fromOverride = paletteFrom(override);
@@ -75,5 +96,5 @@
     return { colours: DEFAULT_PALETTE, source: 'default' };
   }
 
-  return { DEFAULT_PALETTE, MAX_COLOURS, toHex, paletteFrom, effectivePalette };
+  return { DEFAULT_PALETTE, MAX_COLOURS, toHex, paletteFrom, paletteBodyFrom, effectivePalette };
 });
