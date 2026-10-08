@@ -27,8 +27,8 @@ const PRESETS = [
 
 const DOMAIN_OF = {
   bpm: 'look', clock: 'look', colorA: 'look', colorB: 'look', colorC: 'look', colorD: 'look',
-  palette: 'look', paletteOverride: 'look', masterDimmer: 'look',
-  fixtures: 'rig', nowPlaying: 'sources', colorPresets: 'catalogs',
+  palette: 'look', basePalette: 'look', overridePalette: 'look', paletteOverride: 'look', masterDimmer: 'look',
+  fixtures: 'rig', nowPlaying: 'sources', colorPresets: 'catalogs', builtinPalettes: 'catalogs', userPalettes: 'library',
 };
 const domainOf = (key) => DOMAIN_OF[key] || 'system';
 
@@ -62,7 +62,7 @@ function listen(server, port) {
  */
 async function startMockLightshow({ token = 'mock-token', port = 0, socket = true, state = {}, refuseHost = false } = {}) {
   const live = { ...baseState(), ...state };
-  const versions = { look: 0, rig: 0, show: 0, sources: 0, catalogs: 0, system: 0 };
+  const versions = { look: 0, rig: 0, show: 0, sources: 0, catalogs: 0, library: 0, system: 0 };
   const seen = { stateRequests: 0, stateTokens: [], handshakes: [], syncs: 0 };
 
   const server = http.createServer((req, res) => {

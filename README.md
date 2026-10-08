@@ -22,9 +22,12 @@ palette override when it has one, else the look's colours), and:
   above that every second or fourth beat, and at
   least 200 ms between two pulses whatever the beat position does;
 - **draw at most `graphics.maxFps` frames a second** (30 by default);
-- **go calm when the lightshow is gone**: no new pulse, the glow fades within a second,
-  the motion stops where it was and the last colours stay. Nothing strobes while the link
-  is down, and the beat eases back in when it returns.
+- **go calm when the lightshow or NodeCG link is gone**: no new pulse, the glow fades
+  within a second, the motion stops where it was and the last colours stay. Graphics
+  require a connected NodeCG socket, a connected lightshow and a beat update less than
+  two seconds old. A lost NodeCG socket stops new pulses immediately; missing beat
+  updates stop them after two seconds. Reconnecting waits for a fresh beat update and
+  eases the beat back in.
 
 The beat comes from the lightshow, not from a tap here. Between the lightshow's readings
 the extension and every graphic extrapolate the beat at the last tempo, so the pictures
@@ -63,6 +66,7 @@ needs:
 | File | |
 |---|---|
 | [`Install-PartyVisuals.ps1`](install/Install-PartyVisuals.ps1) | Installs EclipseGraphics and this bundle at pinned commits, keeps NodeCG to this machine, stores the lightshow token and, with `-Autostart`, starts NodeCG at logon. Windows PowerShell 5.1 or PowerShell 7. |
+| [`Start-PartyVisualsOBS.ps1`](install/Start-PartyVisualsOBS.ps1) | Optional OBS task action: waits for both local graphics, opens the selected collection/profile in the desktop, and avoids a second OBS process. |
 | [`obs-scene-collection.json`](install/obs-scene-collection.json) | The OBS scene collection **Party Visuals**: the wash and the bar as 1920 × 1080 browser sources. |
 | [`companion-page.md`](install/companion-page.md) | A Companion page with the lightshow's buttons and the visuals' side by side. |
 
@@ -100,7 +104,9 @@ What the script does:
    (inheritance off, one rule). It is not shown, logged or put on a command line.
 6. With `-Autostart`, registers the scheduled task **PartyVisuals NodeCG**, which runs
    EclipseGraphics' `start.js` at this user's logon in a console window; closing the
-   window stops NodeCG.
+   window stops its current process. The task ignores duplicate starts, has no time
+   limit, starts when a missed trigger becomes available, and retries a failed process
+   every minute up to 999 times. Use `Stop-ScheduledTask` for an intentional stop.
 
 It can be run again: what is in place is kept, and the packages are installed again
 only when a lockfile or the Node.js major version changed. `-NewToken` asks for the token again,
@@ -129,6 +135,24 @@ By hand on the show PC:
   `cfg\party-visuals.json` (restart NodeCG after a change), the intensities (wash 50 and
   bar 80 by default, from the panel or Companion), and a look at the wash's pulse for
   photosensitivity.
+
+For OBS login startup, copy `Start-PartyVisualsOBS.ps1` to a stable local folder and
+create one Task Scheduler task for the show user's logon, **Run only when user is
+logged on**, with a 30-second delay. Run Windows PowerShell with arguments
+`-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "<launcher path>" -Profile "<existing profile name>"`.
+The default collection and scene are **Party Visuals**. Set **Start in** to the
+launcher's folder, ignore new instances, remove the execution time limit, and enable
+restart on failure every minute. Check for an existing OBS Startup shortcut or task
+before adding one.
+
+The helper waits up to five minutes for both graphics to answer locally; a timeout
+fails the task so its retry can handle a slow NodeCG startup. OBS starts minimized
+with its executable folder as its working directory, without output-start flags.
+The helper keeps running until OBS exits and passes its exit code to Task Scheduler.
+It preserves saved projectors. OBS stores their display numbers, so verify the target
+with the intended display enabled before saving a fullscreen projector; a missing
+display must not be replaced with another monitor. OBS 32 can prompt after an unclean
+shutdown, which still needs a desktop response before a normal launch continues.
 
 NodeCG listens on 127.0.0.1 only, so OBS and Companion run on the show PC too. The show
 PC reaches the lightshow at its port 3000, which the lightshow's host has to admit from
@@ -227,7 +251,7 @@ Written by the extension; graphics and panels read them.
 | `bpm` | The lightshow's tempo (its clock's, else the typed one); null before it has sent one. |
 | `beatPos` | `{beat, bpm, at, epoch, locked}`: the beat position at time `at` (ms since 1970), re-published twice a second while connected; graphics extrapolate from it. `locked` says whether the phase came from the lightshow or is the extension's own. |
 | `clockSource` | What the lightshow's clock follows: `auto`, `cdj`, `track`, `live` or `tap`. |
-| `palette` | The look's colours as `#RRGGBB`, white, amber and UV mixed in as the lightshow's own swatches show them. Kept across restarts. |
+| `palette` | The base look's screen colours as `#RRGGBB`, white, amber and UV mixed in as the lightshow's own swatches show them; selected gradients use the stop-colour approximation below. Kept across restarts. |
 | `paletteOverride` | The lightshow's palette override as `#RRGGBB`, or null (also when the lightshow does not send one). |
 | `connection` | `{status, via, since, lastUpdate, error, retryInMs, target}`; `status` is `connecting`, `connected`, `reconnecting`, `error` or `stopped` (NodeCG shutting down), `via` is `socket` or `http`. Never the token. |
 | `controls` | `{wash: {on, intensity}, bar: {on, intensity}}`. Kept across restarts. |
@@ -238,11 +262,18 @@ Each has its JSON schema in `schemas/`.
 
 ```mermaid
 flowchart LR
+  Logon[Windows user logon] --> NodeTask[NodeCG task]
+  NodeTask --> Mirror
+  Logon --> OBSLauncher[OBS task waits for local graphics]
+  OBSLauncher --> OBS
   Lightshow[ArtNet Lightshow] -->|Socket.IO snapshot / patch| Mirror[Extension state mirror]
   Lightshow -->|HTTP poll while socket is down| Mirror
-  Mirror --> Clock[Beat extrapolation and palette]
+  Mirror -->|Fresh clock readings| Clock[Beat extrapolation]
+  Mirror -->|Base / override palette| Colours[Emitter mix and gradient stop colours]
   Clock --> Replicants[NodeCG Replicants]
-  Replicants --> Graphics[Wash and bar graphics]
+  Colours --> Replicants
+  Replicants --> Fresh[NodeCG connected and beat update under 2 seconds old]
+  Fresh --> Graphics[Wash and bar graphics]
   Graphics --> OBS[OBS browser sources]
   Controls[Dashboard / Companion] -->|Bundle commands| Replicants
 ```
@@ -251,8 +282,32 @@ The extension is a read-only client of the lightshow server. It connects over So
 asking for protocol 2 (`auth: {token, protocol: 2}`), takes the snapshot, then applies
 the patches, each domain's version in order; a missed patch makes it ask for the whole
 state again (`sync`). It reads `bpm`, `clock` (`source`, `bpm`, and `beatPos` and `epoch`
-when the lightshow sends them), the look's four colour slots through the colour-preset
-catalogue, and `paletteOverride` when there is one. It sends nothing else.
+when the lightshow sends them), `basePalette` and `overridePalette`. Older servers use
+the four colour slots through the colour-preset catalogue and `paletteOverride`.
+The three palette fields belong to the `look` domain; catalogue/library changes alone
+do not refresh the beat. Palette-only and typed-bpm-only patches never reuse an old
+`clock.beatPos` as a new clock reading. The extension sends nothing except `sync`.
+
+Palette compatibility is checked against ArtNet Lightshow
+[`2b539dc`](https://github.com/tyclab/artnet-lightshow/commit/2b539dc546757cb7f740817321eb7a56e0e88f44).
+Hex colours accept `#RGB`, `#RRGGBB`, `#RRGGBBWW`, `#RRGGBBWWAA` and
+`#RRGGBBWWAAUU`; the trailing bytes are emitters, never transparency. White adds to
+all three screen channels, amber adds red and half as much green, and UV appears as
+visible violet (20% red, 90% blue). Overflow is scaled proportionally, matching the
+engine's swatches; a screen does not emit UV. New palette bodies take precedence;
+clearing `overridePalette` restores the base colours. Stage random slots are resolved
+by the engine before publication. An unresolved random marker uses its corresponding
+legacy slot when available and is otherwise omitted; graphics never roll their own
+random colours on refresh or reconnect.
+
+**Gradient approximation:** the selected named gradient, or the selected gradient-set
+role, supplies its stop colours in authored order (slot references and literal colours
+both work). As in the engine, selection defaults to the first gradient. At most eight
+distinct colours are retained in first-appearance order. The wash uses its existing
+moving RGB blend and the bar uses its existing scrolling colour blocks. Stop positions,
+RGB/OKLCH/step interpolation, wrap settings and repeated-stop spacing are not reproduced;
+this follows the selected gradient's colours, not its authored spatial appearance.
+Without a usable gradient, the palette's colours are used directly.
 
 While the socket is down it polls `GET /api/state` (the token in the `X-Lightshow-Token`
 header), so the tempo and colours get through a proxy that will not carry the socket.
@@ -279,6 +334,7 @@ machine. `shared/` is loaded both by the extension and, as plain scripts, by the
 On Windows, `powershell -NoProfile -ExecutionPolicy Bypass -File test\install.test.ps1`
 checks the install script in a folder under `%TEMP%`: the token file, the configuration
 merges and the install folder checks. It installs nothing and registers no task.
+`test\obs-start.test.ps1` checks the OBS launcher with mocked HTTP and process calls.
 
 ## Licence
 

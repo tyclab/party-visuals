@@ -89,6 +89,27 @@ test('patches update the look, and a lost patch brings a fresh snapshot', async 
   assert.equal(after.palette[0], '#FF0000');
 });
 
+test('new palette patches recover across gaps and a newly opened client receives the same colours', async (t) => {
+  const show = await startMockLightshow({ token: TOKEN, state: { basePalette: { colours: ['#000000ff'] } } });
+  const { client } = makeClient(show.url);
+  const fresh = makeClient(show.url).client;
+  t.after(async () => { client.stop(); fresh.stop(); await show.close(); });
+  const first = waitFor(client, 'look');
+  client.start();
+  assert.deepEqual((await first).palette, ['#FFFFFF']);
+  show.publish({ basePalette: { colours: ['#00000000ff'] } }, { drop: true });
+  const recovered = waitFor(client, 'look', (look) => look.paletteOverride?.[0] === '#3300E6');
+  show.publish({ overridePalette: { colours: ['#0000000000ff'] } });
+  const after = await recovered;
+  assert.equal(show.seen.syncs, 1);
+  assert.deepEqual(after.palette, ['#FF8000']);
+  const opened = waitFor(fresh, 'look');
+  fresh.start();
+  const refreshed = await opened;
+  assert.deepEqual(refreshed.palette, after.palette);
+  assert.deepEqual(refreshed.paletteOverride, after.paletteOverride);
+});
+
 test('reconnects with a growing backoff after the lightshow goes away, then starts over', async (t) => {
   let show = await startMockLightshow({ token: TOKEN });
   const port = show.port;
@@ -147,6 +168,22 @@ test('falls back to GET /api/state when the socket cannot connect', async (t) =>
   const look = await slower;
   assert.deepEqual(look.palette, ['#FF0096', '#00E1FF', '#4B00FF', '#80AEFF']);
   assert.ok(!JSON.stringify(statuses).includes(TOKEN));
+});
+
+test('HTTP fallback receives new base and override palette bodies and clears the override', async (t) => {
+  const show = await startMockLightshow({ token: TOKEN, socket: false, state: {
+    basePalette: { colours: ['#000000ff'] }, overridePalette: { colours: ['#00000000ff'] },
+  } });
+  const { client } = makeClient(show.url);
+  t.after(async () => { client.stop(); await show.close(); });
+  const first = waitFor(client, 'look');
+  client.start();
+  const look = await first;
+  assert.deepEqual(look.palette, ['#FFFFFF']);
+  assert.deepEqual(look.paletteOverride, ['#FF8000']);
+  const clear = waitFor(client, 'look', (next) => next.paletteOverride === null);
+  show.publish({ basePalette: { colours: ['#0000000000ff'] }, overridePalette: null });
+  assert.deepEqual((await clear).palette, ['#3300E6']);
 });
 
 test('a poll the lightshow refuses is not repeated every second, and a refused host is named as such', async (t) => {

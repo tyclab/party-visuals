@@ -17,7 +17,7 @@ if ($env:OS -ne 'Windows_NT') {
     exit 0
 }
 
-$installer = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\install\Install-PartyVisuals.ps1')).Path
+$installer = (Resolve-Path -LiteralPath (Join-Path $PSScriptRoot '..\install\Install-PartyVisuals.ps1')).ProviderPath
 $work = Join-Path ([System.IO.Path]::GetTempPath()) ('party-visuals-test-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
 New-Item -ItemType Directory -Path $work | Out-Null
 
@@ -85,6 +85,26 @@ try {
     }
     Check 'the scheduled task of the folder is recognised' (Test-TaskUsesRoot (& $taskOf 'C:\Users\show\AppData\Local\PartyVisuals') 'C:\Users\show\AppData\Local\PartyVisuals')
     Check 'the task of a folder whose name only starts the same is not' (-not (Test-TaskUsesRoot (& $taskOf 'C:\Users\show\AppData\Local\PartyVisuals2') 'C:\Users\show\AppData\Local\PartyVisuals'))
+
+    Import-Module ScheduledTasks
+    $script:registeredTask = $null
+    $originalTaskName = $TaskName
+    $TaskName = 'PartyVisuals Test ' + [guid]::NewGuid().ToString('N')
+    function Register-ScheduledTask {
+        param($TaskName, $Description, $Action, $Trigger, $Principal, $Settings, [switch] $Force)
+        $script:registeredTask = @{ Name = $TaskName; Action = $Action; Trigger = $Trigger; Principal = $Principal; Settings = $Settings }
+    }
+    try {
+        Register-Autostart -Node 'C:\Program Files\nodejs\node.exe' -StartScript "$work\EclipseGraphics\start.js" -WorkDir "$work\EclipseGraphics" -Confirm:$false
+        $t = $script:registeredTask
+        Check 'autostart quotes the script and retains the working directory' ($t.Action.Arguments -eq "`"$work\EclipseGraphics\start.js`"" -and $t.Action.WorkingDirectory -eq "$work\EclipseGraphics")
+        Check 'autostart uses this user''s interactive limited desktop' ($t.Principal.UserId -eq [System.Security.Principal.WindowsIdentity]::GetCurrent().Name -and $t.Principal.LogonType -eq 'Interactive' -and $t.Principal.RunLevel -eq 'Limited')
+        Check 'autostart recovers failures and missed starts without duplicate instances' ($t.Settings.RestartCount -eq 999 -and $t.Settings.RestartInterval -eq 'PT1M' -and $t.Settings.StartWhenAvailable -and $t.Settings.MultipleInstances -eq 'IgnoreNew' -and $t.Settings.ExecutionTimeLimit -eq 'PT0S')
+        Check 'autostart test registered no real task' (-not (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue))
+    } finally {
+        Remove-Item -LiteralPath function:Register-ScheduledTask
+        $TaskName = $originalTaskName
+    }
 
     # ------------------------------------------------------------ the token
 
