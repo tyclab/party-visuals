@@ -81,7 +81,7 @@ param(
 
     [Parameter(ParameterSetName = 'Install')]
     [ValidatePattern('^([0-9a-f]{40}|v\d+\.\d+\.\d+[0-9A-Za-z.-]*)$')]
-    [string] $BundleRef = 'f1d19b85e1395fb91f31095a146f205d4c4359de',
+    [string] $BundleRef = 'ce35af74cfb09bd124ce3baf1e86df7f830e6274',
 
     [Parameter(ParameterSetName = 'Install')]
     [switch] $NewToken,
@@ -588,7 +588,7 @@ function Register-Autostart {
     $trigger = New-ScheduledTaskTrigger -AtLogOn -User $user
     $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
     # No time limit: the default would stop NodeCG after three days.
-    $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew
+    $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -StartWhenAvailable -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)
     Register-ScheduledTask -TaskName $TaskName -Description 'NodeCG with EclipseGraphics and party-visuals, on 127.0.0.1:9090 (Install-PartyVisuals.ps1)' -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
     Write-Detail "scheduled task '$TaskName' registered"
 }

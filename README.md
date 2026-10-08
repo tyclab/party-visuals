@@ -63,6 +63,7 @@ needs:
 | File | |
 |---|---|
 | [`Install-PartyVisuals.ps1`](install/Install-PartyVisuals.ps1) | Installs EclipseGraphics and this bundle at pinned commits, keeps NodeCG to this machine, stores the lightshow token and, with `-Autostart`, starts NodeCG at logon. Windows PowerShell 5.1 or PowerShell 7. |
+| [`Start-PartyVisualsOBS.ps1`](install/Start-PartyVisualsOBS.ps1) | Optional OBS task action: waits for both local graphics, opens the selected collection/profile in the desktop, and avoids a second OBS process. |
 | [`obs-scene-collection.json`](install/obs-scene-collection.json) | The OBS scene collection **Party Visuals**: the wash and the bar as 1920 × 1080 browser sources. |
 | [`companion-page.md`](install/companion-page.md) | A Companion page with the lightshow's buttons and the visuals' side by side. |
 
@@ -100,7 +101,9 @@ What the script does:
    (inheritance off, one rule). It is not shown, logged or put on a command line.
 6. With `-Autostart`, registers the scheduled task **PartyVisuals NodeCG**, which runs
    EclipseGraphics' `start.js` at this user's logon in a console window; closing the
-   window stops NodeCG.
+   window stops its current process. The task ignores duplicate starts, has no time
+   limit, starts when a missed trigger becomes available, and retries a failed process
+   every minute up to 999 times. Use `Stop-ScheduledTask` for an intentional stop.
 
 It can be run again: what is in place is kept, and the packages are installed again
 only when a lockfile or the Node.js major version changed. `-NewToken` asks for the token again,
@@ -129,6 +132,24 @@ By hand on the show PC:
   `cfg\party-visuals.json` (restart NodeCG after a change), the intensities (wash 50 and
   bar 80 by default, from the panel or Companion), and a look at the wash's pulse for
   photosensitivity.
+
+For OBS login startup, copy `Start-PartyVisualsOBS.ps1` to a stable local folder and
+create one Task Scheduler task for the show user's logon, **Run only when user is
+logged on**, with a 30-second delay. Run Windows PowerShell with arguments
+`-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "<launcher path>" -Profile "<existing profile name>"`.
+The default collection and scene are **Party Visuals**. Set **Start in** to the
+launcher's folder, ignore new instances, remove the execution time limit, and enable
+restart on failure every minute. Check for an existing OBS Startup shortcut or task
+before adding one.
+
+The helper waits up to five minutes for both graphics to answer locally; a timeout
+fails the task so its retry can handle a slow NodeCG startup. OBS starts minimized
+with its executable folder as its working directory, without output-start flags.
+The helper keeps running until OBS exits and passes its exit code to Task Scheduler.
+It preserves saved projectors. OBS stores their display numbers, so verify the target
+with the intended display enabled before saving a fullscreen projector; a missing
+display must not be replaced with another monitor. OBS 32 can prompt after an unclean
+shutdown, which still needs a desktop response before a normal launch continues.
 
 NodeCG listens on 127.0.0.1 only, so OBS and Companion run on the show PC too. The show
 PC reaches the lightshow at its port 3000, which the lightshow's host has to admit from
@@ -238,6 +259,10 @@ Each has its JSON schema in `schemas/`.
 
 ```mermaid
 flowchart LR
+  Logon[Windows user logon] --> NodeTask[NodeCG task]
+  NodeTask --> Mirror
+  Logon --> OBSLauncher[OBS task waits for local graphics]
+  OBSLauncher --> OBS
   Lightshow[ArtNet Lightshow] -->|Socket.IO snapshot / patch| Mirror[Extension state mirror]
   Lightshow -->|HTTP poll while socket is down| Mirror
   Mirror -->|Fresh clock readings| Clock[Beat extrapolation]
@@ -305,6 +330,7 @@ machine. `shared/` is loaded both by the extension and, as plain scripts, by the
 On Windows, `powershell -NoProfile -ExecutionPolicy Bypass -File test\install.test.ps1`
 checks the install script in a folder under `%TEMP%`: the token file, the configuration
 merges and the install folder checks. It installs nothing and registers no task.
+`test\obs-start.test.ps1` checks the OBS launcher with mocked HTTP and process calls.
 
 ## Licence
 
