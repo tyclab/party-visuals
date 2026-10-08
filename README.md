@@ -8,8 +8,8 @@ cards, lower thirds and tickers, this bundle draws what moves with the music beh
 around them.
 
 The show PC displays Music Assistant's native MilkDrop visualizer in fullscreen
-Chrome. The browser launcher waits for the Q90A, uses a dedicated persistent
-profile and follows the existing Companion visual on/off controls. OBS is not
+Chrome. The browser launcher opens it in a dedicated persistent profile on
+whichever screen it was last left and follows the existing Companion visual on/off controls. OBS is not
 part of this workflow. The wash and bar below remain available as optional local
 graphics.
 
@@ -71,7 +71,7 @@ EclipseGraphics' panels.
 | File | |
 |---|---|
 | [`Install-PartyVisuals.ps1`](install/Install-PartyVisuals.ps1) | Installs EclipseGraphics and this bundle at pinned commits, keeps NodeCG to this machine, stores the lightshow token and, with `-Autostart`, starts NodeCG at logon. Windows PowerShell 5.1 or PowerShell 7. |
-| [`Start-PartyVisualsBrowser.ps1`](install/Start-PartyVisualsBrowser.ps1) | Starts a dedicated fullscreen Chrome display on the active Q90A and supervises the local browser helper. Waits while the TV is absent. |
+| [`Start-PartyVisualsBrowser.ps1`](install/Start-PartyVisualsBrowser.ps1) | Opens the visualizer fullscreen in a dedicated Chrome profile and supervises the local browser helper until the window closes. |
 | [`companion-page.md`](install/companion-page.md) | A Companion page with the lightshow's buttons and the visuals' side by side. |
 
 From a normal (not elevated) PowerShell window, as the Windows user who runs the show:
@@ -137,21 +137,20 @@ Register one **PartyVisuals Browser** task at the intended user's interactive
 logon, running Windows PowerShell with arguments
 `-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "<launcher path>"`.
 Use limited privileges, ignore duplicate starts, remove the execution time limit,
-start when available and retry failures every minute. Replace the former OBS
-startup task after validating the browser setup.
+start when available and retry failures every minute. Closing the window ends the
+task; run the task again to reopen it.
 
-The launcher identifies the Q90A by hardware ID `SAM7140` and waits until Windows
-exposes it as an active desktop. It uses its current bounds, including negative
-coordinates, and hides its own browser window if the TV disconnects. It does not
-move the mouse or send keys. Chrome uses a dedicated persistent profile and an
-ephemeral loopback debugging port; the helper accesses only the configured Music
-Assistant player page. Normal app launch may receive Windows focus.
+The launcher sets no screen or window size. Chrome reopens the app window on the
+screen where it was last closed, so put it where it belongs once: leave fullscreen
+with F11, drag it to that screen and press F11 again, or move it fullscreen with
+Win+Shift+Left/Right. Chrome uses a dedicated persistent profile and an ephemeral
+loopback debugging port; the helper accesses only the configured Music Assistant
+player page.
 
 The helper hides the album artwork, timeline and tint while retaining Music
 Assistant's native visualizer. Existing Companion **VISUALS OFF/ON** buttons use
 NodeCG's `wash.on` switch to cover or reveal it; `all/air.off` and `all/air.on`
-already control that switch. Remove the former OBS actions and unused OBS
-connection. Wash/bar intensity remains specific to those optional graphics.
+already control that switch. Wash/bar intensity remains specific to those optional graphics.
 
 The browser workflow runs without a lightshow output connection by default.
 Optional `-Curtain` uses the separately deployed guarded pixel-input feature;
@@ -269,7 +268,7 @@ Each has its JSON schema in `schemas/`.
 flowchart LR
   Logon[Windows user logon] --> NodeTask[NodeCG task]
   NodeTask --> Mirror
-  Logon --> BrowserTask[Browser task waits for active Q90A]
+  Logon --> BrowserTask[Browser task]
   BrowserTask --> Browser[Fullscreen Music Assistant browser]
   Music[Music Assistant PCM] --> Browser
   BrowserTask --> Helper[Local browser helper]

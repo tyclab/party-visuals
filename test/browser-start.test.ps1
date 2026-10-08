@@ -14,32 +14,17 @@ function Throws([string] $Name, [scriptblock] $Action) {
 }
 . (Join-Path $PSScriptRoot '..\install\Start-PartyVisualsBrowser.ps1')
 Initialize-BrowserNative
-$script:displays = @()
-function Get-DesktopDisplays { $script:displays }
-Check 'no active TV defers launch' ($null -eq (Get-VisualsDisplay))
-$lg = [pscustomobject]@{ Name = '\\.\DISPLAY2'; HardwareId = 'MONITOR\GSM7754\instance'; Active = $true; X = 0; Y = 0; Width = 3840; Height = 1600 }
-$tv = [pscustomobject]@{ Name = '\\.\DISPLAY3'; HardwareId = 'MONITOR\SAM7140\instance'; Active = $true; X = -1920; Y = -2160; Width = 3840; Height = 2160 }
-$script:displays = @($lg)
-Check 'LG is never a fallback' ($null -eq (Get-VisualsDisplay))
-$script:displays = @($lg, $tv)
-$chosen = Get-VisualsDisplay
-Check 'TV uses hardware ID and current negative desktop bounds' ($chosen.Name -eq '\\.\DISPLAY3' -and $chosen.X -eq -1920 -and $chosen.Y -eq -2160 -and $chosen.Height -eq 2160)
-$tv.Active = $false
-Check 'remembered inactive TV is not usable' ($null -eq (Get-VisualsDisplay))
-$tv.Active = $true
-$script:displays = @($tv, $tv)
-Throws 'ambiguous matching TVs fail safely' { Get-VisualsDisplay }
-$script:displays = @($tv)
 $BrowserProfile = 'C:\Users\Test User\AppData\Local\PartyVisuals\browser-profile'
 foreach ($value in @('plain', 'C:\trailing space\', 'a"quoted"b', 'http://example.test/#/?a=1&b=2', '')) {
     $roundtrip = [PartyBrowserNative]::Arguments('program.exe ' + (ConvertTo-NativeArgument $value))
     Check ('native argument round trip: ' + $value) ($roundtrip.Count -eq 2 -and $roundtrip[1] -ceq $value)
 }
 Throws 'arguments reject line breaks' { ConvertTo-NativeArgument "a`nb" }
-$browserArgs = @(Get-BrowserArguments $tv)
+$browserArgs = @(Get-BrowserArguments)
 Check 'Chrome debugging is ephemeral and explicitly loopback' ($browserArgs -contains '--remote-debugging-port=0' -and $browserArgs -contains '--remote-debugging-address=127.0.0.1')
 Check 'Chrome retains dedicated profile and normal auth storage' ($browserArgs -contains ('--user-data-dir=' + $BrowserProfile) -and -not ($browserArgs -match 'incognito|guest|disable-web-security'))
-Check 'Chrome receives app fullscreen and exact TV geometry' ($browserArgs -contains '--start-fullscreen' -and $browserArgs -contains ('--app=' + $VisualizerUrl) -and $browserArgs -contains '--window-position=-1920,-2160' -and $browserArgs -contains '--window-size=3840,2160')
+Check 'Chrome opens the visualizer app fullscreen' ($browserArgs -contains '--start-fullscreen' -and $browserArgs -contains ('--app=' + $VisualizerUrl))
+Check 'no window geometry, so Chrome keeps the screen the operator chose' (-not ($browserArgs -match '^--window-(position|size)='))
 $helperArgs = @(Get-HelperArguments)
 Check 'display helper has parent lifecycle and no curtain by default' ($helperArgs -contains '--parent-pid' -and $helperArgs -contains '--controls-url' -and $helperArgs -notcontains '--curtain')
 $Curtain = $true
@@ -54,6 +39,8 @@ $command = 'chrome.exe ' + (($browserArgs | ForEach-Object { ConvertTo-NativeArg
 $owner = [pscustomobject]@{ SessionId = 77; ProcessId = 123; CommandLine = $command }
 $script:processes = @([pscustomobject]@{ SessionId = 77; ProcessId = 456; CommandLine = 'chrome.exe' }, $owner)
 Check 'only matching dedicated Chrome is adopted' ((Get-ProfileBrowser).Id -eq 123)
+$owner.CommandLine = $command.Replace(' "--start-fullscreen"', '')
+Check 'a dedicated window started without fullscreen is still adopted' ((Get-ProfileBrowser).Id -eq 123)
 $owner.CommandLine = $command + ' --type=renderer'
 Check 'renderer subprocess cannot own profile' ($null -eq (Get-ProfileBrowser))
 $owner.CommandLine = $command.Replace('--remote-debugging-port=0', '--remote-debugging-port=9222')
@@ -74,33 +61,27 @@ Check 'helper receives graceful stdin stop before disposal' ($stopping.StandardI
 $script:waitReady = $false
 Stop-BrowserHelper $stopping
 Check 'unresponsive owned helper is terminated before retry' $script:killed
-$script:events = @()
-$script:sleeps = 0
-$script:helperStops = 0
 function Initialize-BrowserNative { }
-function Test-Path { param($LiteralPath, $PathType); return $true }
-function Start-Process { throw 'Tests must never launch a real application.' }
-function Set-BrowserDisplay { param($ProcessId, $Display); $script:events += $(if ($null -eq $Display) { 'hide' } else { 'place' }); return $true }
+function New-Item { param($ItemType, $Path, [switch] $Force) }
 function Start-BrowserHelper { $script:events += 'helper-start'; return [pscustomobject]@{ HasExited = $false } }
-function Stop-BrowserHelper { param($Process); if ($null -ne $Process) { $script:events += 'helper-stop'; $script:helperStops++ } }
-function Start-Sleep {
-    param($Seconds)
-    $script:sleeps++
-    if ($script:sleeps -eq 1) { $script:displays = @() }
-    if ($script:sleeps -ge 2) { throw 'test-loop-complete' }
-}
+function Stop-BrowserHelper { param($Process); if ($null -ne $Process) { $script:events += 'helper-stop' } }
+function Start-Process { param($FilePath, $WorkingDirectory, $ArgumentList, [switch] $PassThru); $script:events += 'browser-start'; $script:launchArgs = $ArgumentList; return $script:browser }
+function Start-Sleep { param($Seconds); $script:browser.HasExited = $true }
+function Get-ProfileBrowser { $null }
+function Test-Path { param($LiteralPath, $PathType); return $true }
 $previousProfile = $BrowserProfile
 $BrowserProfile = Join-Path $env:LOCALAPPDATA 'Google\Chrome\User Data\Default'
 Throws 'normal Chrome profile cannot be used by launcher' { Start-VisualsBrowser }
 $BrowserProfile = $previousProfile
-$script:displays = @($tv)
-try { Start-VisualsBrowser | Out-Null } catch { if ($_.Exception.Message -ne 'test-loop-complete') { throw } }
-Check 'helper starts only after exact TV placement' (($script:events -join ',').StartsWith('place,helper-start'))
-Check 'TV disconnect hides owned window and stops helper' (($script:events -join ',') -eq 'place,helper-start,hide,helper-stop')
+function Test-Path { param($LiteralPath, $PathType); return ($PathType -eq 'Leaf') }
+$script:browser = [pscustomobject]@{ HasExited = $false }
 $script:events = @()
-$script:sleeps = 0
-$script:processes = @()
-$script:displays = @()
-try { Start-VisualsBrowser | Out-Null } catch { if ($_.Exception.Message -ne 'test-loop-complete') { throw } }
-Check 'absent TV starts neither browser nor helper' ($script:events.Count -eq 0)
+$code = Start-VisualsBrowser
+Check 'opens the browser once, runs the helper, and stops it when the window closes' ($code -eq 0 -and ($script:events -join ',') -eq 'browser-start,helper-start,helper-stop')
+Check 'launch carries no window geometry' ($script:launchArgs -notmatch '--window-(position|size)=')
+$script:browser = [pscustomobject]@{ HasExited = $false }
+function Get-ProfileBrowser { $script:browser }
+$script:events = @()
+[void](Start-VisualsBrowser)
+Check 'an already open dedicated browser is adopted, not relaunched' (($script:events -join ',') -eq 'helper-start,helper-stop')
 Write-Host "$script:passed passed, 0 failed"
