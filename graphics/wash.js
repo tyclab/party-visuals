@@ -14,7 +14,7 @@
   const STOPS = 6;
 
   run('wash', (ctx, f) => {
-    const { width: w, height: h, palette, motion, pulse, level } = f;
+    const { width: w, height: h, palette, motion, pulse, level, energy = 0 } = f;
     const n = palette.length;
     const flow = motion / FLOW_BEATS;
 
@@ -23,7 +23,7 @@
     const dx = Math.cos(angle) * r;
     const dy = Math.sin(angle) * r;
     const wash = ctx.createLinearGradient(w / 2 - dx, h / 2 - dy, w / 2 + dx, h / 2 + dy);
-    const alpha = level * (0.45 + 0.25 * pulse);
+    const alpha = level * (0.45 + 0.2 * energy + 0.25 * pulse);
     for (let i = 0; i < STOPS; i++) {
       wash.addColorStop(i / (STOPS - 1), rgba(along(palette, flow + (i * n) / (STOPS - 1)), alpha));
     }
@@ -31,7 +31,7 @@
     ctx.fillRect(0, 0, w, h);
 
     if (pulse > 0.002) {
-      const glow = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, h * 0.75);
+      const glow = ctx.createRadialGradient(w / 2, h / 2, 0, w / 2, h / 2, h * (0.6 + energy * 0.25));
       const c = along(palette, flow + n / 2);
       glow.addColorStop(0, rgba(c, 0.35 * level * pulse));
       glow.addColorStop(1, rgba(c, 0));

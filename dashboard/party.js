@@ -9,7 +9,7 @@
   const PV = window.PartyVisuals;
   const $ = (id) => document.getElementById(id);
   const reps = {};
-  for (const name of ['connection', 'bpm', 'clockSource', 'beatPos', 'palette', 'paletteOverride', 'controls']) {
+  for (const name of ['connection', 'bpm', 'clockSource', 'beatPos', 'palette', 'paletteOverride', 'controls', 'audio', 'audioMode']) {
     reps[name] = nodecg.Replicant(name);
   }
 
@@ -41,6 +41,11 @@
     if (c.status !== 'connected') parts.push('graphics calm');
     if (c.error) parts.push(c.error);
     $('detail').textContent = parts.join(' · ');
+    const audio = reps.audio.value;
+    const audioAge = audio ? Date.now() - audio.at : Infinity;
+    $('audioResponse').textContent = c.status === 'connected' && reps.audioMode.value === 'reactive' && audioAge >= 0 && audioAge < 600
+      ? 'Shared audio: following the lights’ hits and energy'
+      : 'Tempo and colours only · enable Reactive audio in ArtNet for shared music response';
   }
 
   function showTempo() {

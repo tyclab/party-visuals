@@ -15,9 +15,9 @@
   const MARGIN = 72;
 
   run('bar', (ctx, f) => {
-    const { width: w, height: h, palette, motion, pulse, level } = f;
+    const { width: w, height: h, palette, motion, pulse, level, energy = 0 } = f;
     const n = palette.length;
-    const barHeight = HEIGHT + SWELL * pulse;
+    const barHeight = HEIGHT + SWELL * pulse + 28 * energy;
     const middle = top ? MARGIN + HEIGHT / 2 : h - MARGIN - HEIGHT / 2;
     const y = middle - barHeight / 2;
 

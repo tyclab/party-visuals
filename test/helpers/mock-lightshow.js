@@ -63,7 +63,7 @@ function listen(server, port) {
 async function startMockLightshow({ token = 'mock-token', port = 0, socket = true, state = {}, refuseHost = false } = {}) {
   const live = { ...baseState(), ...state };
   const versions = { look: 0, rig: 0, show: 0, sources: 0, catalogs: 0, library: 0, system: 0 };
-  const seen = { stateRequests: 0, stateTokens: [], handshakes: [], syncs: 0 };
+  const seen = { stateRequests: 0, stateTokens: [], handshakes: [], syncs: 0, subscriptions: [] };
 
   const server = http.createServer((req, res) => {
     if (req.url.split('?')[0] === '/api/state') {
@@ -101,6 +101,10 @@ async function startMockLightshow({ token = 'mock-token', port = 0, socket = tru
       return next(err);
     });
     io.on('connection', (s) => {
+      s.on('subscribe', (feeds) => {
+        seen.subscriptions.push(feeds);
+        if (Array.isArray(feeds) && feeds.includes('audio')) s.join('audio');
+      });
       const snapshot = () => ({ protocol: 2, versions: { ...versions }, state: { ...live } });
       if (s.handshake.auth && s.handshake.auth.protocol === 2) {
         s.join('v2');
@@ -126,6 +130,7 @@ async function startMockLightshow({ token = 'mock-token', port = 0, socket = tru
     state: live,
     versions,
     seen,
+    audio(feed) { io?.to('audio').emit('audio', feed); },
 
     /** Change keys and send the patches; `drop` loses them on the way, as a missed message would be. */
     publish(changes, { drop = false } = {}) {

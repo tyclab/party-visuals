@@ -35,9 +35,16 @@ palette override when it has one, else the look's colours), and:
   updates stop them after two seconds. Reconnecting waits for a fresh beat update and
   eases the beat back in.
 
-The beat comes from the lightshow, not from a tap here. Between the lightshow's readings
-the extension and every graphic extrapolate the beat at the last tempo, so the pictures
-move smoothly at the graphics' own frame rate.
+The beat comes from the lightshow, not from a tap here. In Reactive mode,
+the graphics can also follow its shared audio hits and energy.
+The wash brightens and expands with the music, and the bar grows with its energy.
+Audio and tempo pulses share one five-pulse-per-second cap. The dashboard reports
+whether shared audio is available; a lost audio feed returns to tempo and colour
+animation without replaying old hits. Screen and lamp effects share musical input,
+but this does not mirror individual lamp pixels or certify optical latency.
+
+Between clock readings, the extension and every graphic extrapolate the beat at
+the last tempo, so the pictures move smoothly at the graphics' own frame rate.
 
 ## Install beside EclipseGraphics
 
@@ -257,6 +264,8 @@ Written by the extension; graphics and panels read them.
 | `clockSource` | What the lightshow's clock follows: `auto`, `cdj`, `track`, `live` or `tap`. |
 | `palette` | The base look's screen colours as `#RRGGBB`, white, amber and UV mixed in as the lightshow's own swatches show them; selected gradients use the stop-colour approximation below. Kept across restarts. |
 | `paletteOverride` | The lightshow's palette override as `#RRGGBB`, or null (also when the lightshow does not send one). |
+| `audioMode` | `off`, `tempo`, `reactive`, or null for older servers. |
+| `audio` | Latest bounded shared audio frame with local receive timestamp, event identity, energy and bands; null while disconnected. Graphics discard it after 600 ms. |
 | `connection` | `{status, via, since, lastUpdate, error, retryInMs, target}`; `status` is `connecting`, `connected`, `reconnecting`, `error` or `stopped` (NodeCG shutting down), `via` is `socket` or `http`. Never the token. |
 | `controls` | `{wash: {on, intensity}, bar: {on, intensity}}`. Kept across restarts. |
 
@@ -276,6 +285,8 @@ flowchart LR
   Helper -->|Display visibility| Browser
   Lightshow[ArtNet Lightshow] -->|Socket.IO snapshot / patch| Mirror[Extension state mirror]
   Lightshow -->|HTTP poll while socket is down| Mirror
+  Lightshow -->|Read-only audio subscription| Audio[Shared hit identity and energy]
+  Audio --> Replicants
   Mirror -->|Fresh clock readings| Clock[Beat extrapolation]
   Mirror -->|Base / override palette| Colours[Emitter mix and gradient stop colours]
   Clock --> Replicants[NodeCG Replicants]
@@ -294,7 +305,14 @@ when the lightshow sends them), `basePalette` and `overridePalette`. Older serve
 the four colour slots through the colour-preset catalogue and `paletteOverride`.
 The three palette fields belong to the `look` domain; catalogue/library changes alone
 do not refresh the beat. Palette-only and typed-bpm-only patches never reuse an old
-`clock.beatPos` as a new clock reading. The extension sends nothing except `sync`.
+`clock.beatPos` as a new clock reading. The extension sends `sync` and a read-only
+`subscribe: ['audio']` request on each connection; it sends no lighting commands.
+Audio packets never reset the musical clock. HTTP fallback retains tempo and
+colour support but cannot supply the high-rate audio feed. Older audio producers
+without event IDs supply energy only, so held classifications cannot retrigger.
+The existing `graphics.offsetMs` compensates predictable beat phase; shared audio
+hits arrive live and cannot be advanced before they are observed. Judge actual
+screen/lamp alignment on the target display during commissioning.
 
 Palette compatibility is checked against ArtNet Lightshow
 [`2b539dc`](https://github.com/tyclab/artnet-lightshow/commit/2b539dc546757cb7f740817321eb7a56e0e88f44).

@@ -12,7 +12,7 @@
 
   const DEFAULT_CONTROLS = { wash: { on: true, intensity: 50 }, bar: { on: true, intensity: 80 } };
   const HEARTBEAT_TIMEOUT_MS = 2000;
-  const names = ['beatPos', 'palette', 'paletteOverride', 'connection', 'controls'];
+  const names = ['beatPos', 'palette', 'paletteOverride', 'connection', 'controls', 'audio', 'audioMode'];
   const reps = {};
   for (const name of names) reps[name] = nodecg.Replicant(name);
 
@@ -48,6 +48,8 @@
     read(nowMs) {
       const connection = reps.connection.value || {};
       const controls = reps.controls.value || DEFAULT_CONTROLS;
+      const audio = reps.audio.value;
+      const audioAge = audio ? Date.now() - audio.at : Infinity;
       return {
         beat: clock.started ? clock.at(nowMs + offsetMs) : null,
         bpm: clock.bpm || 120,
@@ -55,6 +57,7 @@
           && nowMs - heartbeatAt < HEARTBEAT_TIMEOUT_MS,
         palette: PV.effectivePalette({ override: reps.paletteOverride.value, palette: reps.palette.value }).colours,
         controls,
+        audio: socket.connected && reps.audioMode.value === 'reactive' && audioAge >= 0 && audioAge < 600 ? audio : null,
       };
     },
   };

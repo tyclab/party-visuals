@@ -44,6 +44,22 @@ function browserFeed({ connected = true } = {}) {
   };
 }
 
+test('shared audio is used only in Reactive mode and expires independently of beat heartbeats', () => {
+  const browser = browserFeed();
+  browser.beat();
+  browser.change('audioMode', 'reactive');
+  const audio = { at: 1_790_000_000_000, t: 1, eventT: 1, beat: 'soft', energy: 0.4 };
+  browser.change('audio', audio);
+  assert.deepEqual(browser.at(599).audio, audio);
+  assert.equal(browser.at(600).audio, null);
+  browser.at(100);
+  browser.change('audioMode', 'tempo');
+  assert.equal(browser.at(100).audio, null);
+  browser.change('audioMode', 'reactive');
+  browser.socket.connected = false;
+  assert.equal(browser.at(100).audio, null);
+});
+
 test('a lost NodeCG socket calms graphics immediately despite a cached connected Replicant', () => {
   const browser = browserFeed();
   const visual = new BeatVisual();
