@@ -8,6 +8,7 @@ param(
     [string] $VisualizerUrl = 'http://10.27.2.42:8095/#/now-playing?player=02%3A01%3Abb%3A12%3A81%3A49&frameless=1',
     [string] $ControlsUrl = 'http://127.0.0.1:9090/bundles/party-visuals/api/state',
     [switch] $Curtain,
+    [switch] $Room,
     [string] $NodecgConfig = "$env:LOCALAPPDATA\PartyVisuals\EclipseGraphics\cfg\party-visuals.json",
     [ValidateRange(1, 65535)]
     [int] $Fixture = 53
@@ -64,6 +65,11 @@ function Get-HelperArguments {
         '--fixture'; [string]$Fixture
         '--width'; '68'; '--height'; '42'; '--fps'; '10'; '--fit'; 'cover'
     }
+    if ($Room) {
+        # The room picture rides the same lightshow connection; the configuration path is given once.
+        '--room'
+        if (-not $Curtain) { '--nodecg-config'; $NodecgConfig }
+    }
 }
 
 function Get-ProfileBrowser {
@@ -117,7 +123,7 @@ function Start-VisualsBrowser {
     foreach ($path in @($ChromeExe, $NodeExe, $HelperPath)) {
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required executable or helper is missing: $path" }
     }
-    if ($Curtain -and -not (Test-Path -LiteralPath $NodecgConfig -PathType Leaf)) { throw 'The curtain configuration is missing.' }
+    if (($Curtain -or $Room) -and -not (Test-Path -LiteralPath $NodecgConfig -PathType Leaf)) { throw 'The lightshow output configuration is missing.' }
     $profile = [IO.Path]::GetFullPath($BrowserProfile).TrimEnd('\')
     $normalProfile = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'Google\Chrome\User Data')).TrimEnd('\')
     if ($profile -ieq $normalProfile -or $profile.StartsWith($normalProfile + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'A separate PartyVisuals browser profile is required; the normal Chrome profile is not supported.' }

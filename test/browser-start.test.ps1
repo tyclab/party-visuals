@@ -31,6 +31,14 @@ $Curtain = $true
 $helperArgs = @(Get-HelperArguments)
 Check 'optional curtain helper receives logical geometry and capped frame rate' (($helperArgs -join '|') -match '\|--curtain\|--nodecg-config\|' -and ($helperArgs -join '|').EndsWith('|--width|68|--height|42|--fps|10|--fit|cover'))
 $Curtain = $false
+$Room = $true
+$helperArgs = @(Get-HelperArguments)
+Check 'optional room picture helper gets the output configuration once' (($helperArgs -join '|') -match '\|--room\|--nodecg-config\|' -and $helperArgs -notcontains '--curtain')
+$Curtain = $true
+$helperArgs = @(Get-HelperArguments)
+Check 'curtain and room together share one configuration path' ((@($helperArgs | Where-Object { $_ -eq '--nodecg-config' })).Count -eq 1 -and $helperArgs -contains '--room' -and $helperArgs -contains '--curtain')
+$Curtain = $false
+$Room = $false
 $script:processes = @()
 function Get-CimInstance { param($ClassName, $Filter); $script:processes }
 function Get-Process { param($Id, $ErrorAction); [pscustomobject]@{ Id = $Id; SessionId = 77; HasExited = $false } }

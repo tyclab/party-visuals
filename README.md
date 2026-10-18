@@ -162,6 +162,11 @@ already control that switch. Wash/bar intensity remains specific to those option
 The browser workflow runs without a lightshow output connection by default.
 Optional `-Curtain` uses the separately deployed guarded pixel-input feature;
 it never arms the rig. Follow the ArtNet helper documentation before enabling it.
+Optional `-Room` streams the same picture as one colour per lamp cell, read at
+each cell's place on the lightshow's plan, for the lightshow's **Picture:
+Visualizer** selector (Perform or Settings → Show); with **Effects** selected the
+show ignores it, so the switch is instant. Both switches can be combined and
+can be added to the "PartyVisuals Browser" task's arguments.
 The browser's own Music Assistant audio path determines visualizer timing;
 `graphics.offsetMs` applies only to this bundle's wash/bar graphics.
 
