@@ -7,6 +7,7 @@ param(
     [string] $HelperPath = "$env:LOCALAPPDATA\PartyVisuals\browser-visuals\cli.js",
     [string] $VisualizerUrl = 'http://10.27.2.42:8095/#/now-playing?player=02%3A01%3Abb%3A12%3A81%3A49&frameless=1',
     [string] $ControlsUrl = 'http://127.0.0.1:9090/bundles/party-visuals/api/state',
+    [string] $TelemetryFile = "$env:LOCALAPPDATA\PartyVisuals\logs\browser-visuals.ndjson",
     [switch] $Curtain,
     [switch] $Room,
     [ValidateRange(0, 60)]
@@ -65,6 +66,7 @@ function Get-HelperArguments {
     '--visualizer-url'; $VisualizerUrl
     '--controls-url'; $ControlsUrl
     '--parent-pid'; [string]$PID
+    if ($Curtain -or $Room) { '--telemetry-file'; $TelemetryFile }
     if ($Curtain) {
         '--curtain'; '--nodecg-config'; $NodecgConfig
         '--fixture'; [string]$Fixture

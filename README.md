@@ -176,11 +176,20 @@ profile. After updating these launch flags, close that browser window once befor
 restarting the task; the launcher refuses to adopt a window with the old flags.
 The profile, login and saved window placement stay in place.
 
-With Tyclab Lightshow's updated helper this targets 44 fps; older helpers retain
-their defaults. Optional `-Fps 60` requests up to 60 captures per second from a
+With the matching Tyclab Lightshow helper this targets 44 fps.
+Optional `-Fps 60` requests up to 60 captures per second from a
 matching helper/server release. Actual refresh depends on capture and delivery
 time, and lighting output currently runs at 44 Hz. Frames stay current instead
 of accumulating in a delivery queue; flash limits remain separate from refresh.
+
+Output mode requires the matching helper with `--telemetry-file` support. It writes
+one summary per output every 30 seconds to
+`%LOCALAPPDATA%\PartyVisuals\logs\browser-visuals.ndjson`, retaining at most two
+1 MiB files. Summaries report acknowledged input rate, capture/ACK latency and
+failure counts; they contain no credentials, player URLs or fixture identities.
+The fleet's Windows Alloy installer collects the active file. Display-only mode
+does not collect pixel telemetry, and log failures never stop capture.
+
 The browser's own Music Assistant audio path determines visualizer timing;
 `graphics.offsetMs` applies only to this bundle's wash/bar graphics.
 
@@ -301,6 +310,7 @@ flowchart LR
   Music[Music Assistant PCM] --> Browser
   BrowserTask --> Helper[Local browser helper]
   Helper -->|Negotiated latest-frame pixel input| Lightshow
+  Helper -.->|30-second bounded summaries| Logs[Existing Alloy / Loki]
   Replicants -->|Visual on/off| Helper
   Helper -->|Display visibility| Browser
   Lightshow[ArtNet Lightshow] -->|Socket.IO snapshot / patch| Mirror[Extension state mirror]
