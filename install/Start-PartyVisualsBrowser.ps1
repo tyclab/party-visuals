@@ -9,6 +9,8 @@ param(
     [string] $ControlsUrl = 'http://127.0.0.1:9090/bundles/party-visuals/api/state',
     [switch] $Curtain,
     [switch] $Room,
+    [ValidateRange(0, 60)]
+    [int] $Fps = 0,
     [string] $NodecgConfig = "$env:LOCALAPPDATA\PartyVisuals\EclipseGraphics\cfg\party-visuals.json",
     [ValidateRange(1, 65535)]
     [int] $Fixture = 53
@@ -63,13 +65,14 @@ function Get-HelperArguments {
     if ($Curtain) {
         '--curtain'; '--nodecg-config'; $NodecgConfig
         '--fixture'; [string]$Fixture
-        '--width'; '68'; '--height'; '42'; '--fps'; '10'; '--fit'; 'cover'
+        '--width'; '68'; '--height'; '42'; '--fit'; 'cover'
     }
     if ($Room) {
         # The room picture rides the same lightshow connection; the configuration path is given once.
         '--room'
         if (-not $Curtain) { '--nodecg-config'; $NodecgConfig }
     }
+    if (($Curtain -or $Room) -and $Fps -gt 0) { '--fps'; [string]$Fps }
 }
 
 function Get-ProfileBrowser {
