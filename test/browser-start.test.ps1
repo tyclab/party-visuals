@@ -29,7 +29,7 @@ $helperArgs = @(Get-HelperArguments)
 Check 'display helper has parent lifecycle and no curtain by default' ($helperArgs -contains '--parent-pid' -and $helperArgs -contains '--controls-url' -and $helperArgs -notcontains '--curtain')
 $Curtain = $true
 $helperArgs = @(Get-HelperArguments)
-Check 'optional curtain helper receives logical geometry and capped frame rate' (($helperArgs -join '|') -match '\|--curtain\|--nodecg-config\|' -and ($helperArgs -join '|').EndsWith('|--width|68|--height|42|--fps|10|--fit|cover'))
+Check 'curtain geometry leaves the default refresh rate to the helper' (($helperArgs -join '|') -match '\|--curtain\|--nodecg-config\|' -and ($helperArgs -join '|').EndsWith('|--width|68|--height|42|--fit|cover') -and $helperArgs -notcontains '--fps')
 $Curtain = $false
 $Room = $true
 $helperArgs = @(Get-HelperArguments)
@@ -37,8 +37,17 @@ Check 'optional room picture helper gets the output configuration once' (($helpe
 $Curtain = $true
 $helperArgs = @(Get-HelperArguments)
 Check 'curtain and room together share one configuration path' ((@($helperArgs | Where-Object { $_ -eq '--nodecg-config' })).Count -eq 1 -and $helperArgs -contains '--room' -and $helperArgs -contains '--curtain')
+$Fps = 60
+$helperArgs = @(Get-HelperArguments)
+Check 'a requested refresh rate is passed once for both outputs' ((@($helperArgs | Where-Object { $_ -eq '--fps' })).Count -eq 1 -and ($helperArgs -join '|').EndsWith('|--fps|60'))
+$Curtain = $false
+$helperArgs = @(Get-HelperArguments)
+Check 'room-only output accepts a requested refresh rate' (($helperArgs -join '|').EndsWith('|--fps|60'))
 $Curtain = $false
 $Room = $false
+$helperArgs = @(Get-HelperArguments)
+Check 'display-only mode does not request pixel captures' ($helperArgs -notcontains '--fps')
+$Fps = 0
 $script:processes = @()
 function Get-CimInstance { param($ClassName, $Filter); $script:processes }
 function Get-Process { param($Id, $ErrorAction); [pscustomobject]@{ Id = $Id; SessionId = 77; HasExited = $false } }

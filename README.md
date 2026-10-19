@@ -167,6 +167,13 @@ each cell's place on the lightshow's plan, for the lightshow's **Picture:
 Visualizer** selector (Perform or Settings → Show); with **Effects** selected the
 show ignores it, so the switch is instant. Both switches can be combined and
 can be added to the "PartyVisuals Browser" task's arguments.
+The launcher lets the helper negotiate its default capture rate with the lightshow
+(`-Fps 0`, the default).
+With Tyclab Lightshow's updated helper this targets 44 fps; older helpers retain
+their defaults. Optional `-Fps 60` requests up to 60 captures per second from a
+matching helper/server release. Actual refresh depends on capture and delivery
+time, and lighting output currently runs at 44 Hz. Frames stay current instead
+of accumulating in a delivery queue; flash limits remain separate from refresh.
 The browser's own Music Assistant audio path determines visualizer timing;
 `graphics.offsetMs` applies only to this bundle's wash/bar graphics.
 
@@ -286,6 +293,7 @@ flowchart LR
   BrowserTask --> Browser[Fullscreen Music Assistant browser]
   Music[Music Assistant PCM] --> Browser
   BrowserTask --> Helper[Local browser helper]
+  Helper -->|Negotiated latest-frame pixel input| Lightshow
   Replicants -->|Visual on/off| Helper
   Helper -->|Display visibility| Browser
   Lightshow[ArtNet Lightshow] -->|Socket.IO snapshot / patch| Mirror[Extension state mirror]
