@@ -28,9 +28,11 @@ Check 'Chrome opens the visualizer app fullscreen' ($browserArgs -contains '--st
 Check 'no window geometry, so Chrome keeps the screen the operator chose' (-not ($browserArgs -match '^--window-(position|size)='))
 $helperArgs = @(Get-HelperArguments)
 Check 'display helper has parent lifecycle and no curtain by default' ($helperArgs -contains '--parent-pid' -and $helperArgs -contains '--controls-url' -and $helperArgs -notcontains '--curtain')
+Check 'display-only helper does not collect pixel telemetry' ($helperArgs -notcontains '--telemetry-file')
 $Curtain = $true
 $helperArgs = @(Get-HelperArguments)
 Check 'curtain geometry leaves the default refresh rate to the helper' (($helperArgs -join '|') -match '\|--curtain\|--nodecg-config\|' -and ($helperArgs -join '|').EndsWith('|--width|68|--height|42|--fit|cover') -and $helperArgs -notcontains '--fps')
+Check 'curtain diagnostics use the bounded local telemetry file' ($helperArgs -contains '--telemetry-file' -and $helperArgs -contains $TelemetryFile)
 $Curtain = $false
 $Room = $true
 $helperArgs = @(Get-HelperArguments)
@@ -38,6 +40,7 @@ Check 'optional room picture helper gets the output configuration once' (($helpe
 $Curtain = $true
 $helperArgs = @(Get-HelperArguments)
 Check 'curtain and room together share one configuration path' ((@($helperArgs | Where-Object { $_ -eq '--nodecg-config' })).Count -eq 1 -and $helperArgs -contains '--room' -and $helperArgs -contains '--curtain')
+Check 'both outputs share one telemetry file argument' ((@($helperArgs | Where-Object { $_ -eq '--telemetry-file' })).Count -eq 1)
 $Fps = 60
 $helperArgs = @(Get-HelperArguments)
 Check 'a requested refresh rate is passed once for both outputs' ((@($helperArgs | Where-Object { $_ -eq '--fps' })).Count -eq 1 -and ($helperArgs -join '|').EndsWith('|--fps|60'))
