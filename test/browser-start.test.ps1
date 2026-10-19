@@ -22,6 +22,7 @@ foreach ($value in @('plain', 'C:\trailing space\', 'a"quoted"b', 'http://exampl
 Throws 'arguments reject line breaks' { ConvertTo-NativeArgument "a`nb" }
 $browserArgs = @(Get-BrowserArguments)
 Check 'Chrome debugging is ephemeral and explicitly loopback' ($browserArgs -contains '--remote-debugging-port=0' -and $browserArgs -contains '--remote-debugging-address=127.0.0.1')
+Check 'dedicated visualizer keeps rendering and capture timers when unfocused' ($browserArgs -contains '--disable-backgrounding-occluded-windows' -and $browserArgs -contains '--disable-renderer-backgrounding' -and $browserArgs -contains '--disable-background-timer-throttling')
 Check 'Chrome retains dedicated profile and normal auth storage' ($browserArgs -contains ('--user-data-dir=' + $BrowserProfile) -and -not ($browserArgs -match 'incognito|guest|disable-web-security'))
 Check 'Chrome opens the visualizer app fullscreen' ($browserArgs -contains '--start-fullscreen' -and $browserArgs -contains ('--app=' + $VisualizerUrl))
 Check 'no window geometry, so Chrome keeps the screen the operator chose' (-not ($browserArgs -match '^--window-(position|size)='))
@@ -62,6 +63,8 @@ $owner.CommandLine = $command + ' --type=renderer'
 Check 'renderer subprocess cannot own profile' ($null -eq (Get-ProfileBrowser))
 $owner.CommandLine = $command.Replace('--remote-debugging-port=0', '--remote-debugging-port=9222')
 Throws 'profile with incompatible startup flags is not taken over' { Get-ProfileBrowser }
+$owner.CommandLine = $command.Replace(' "--disable-backgrounding-occluded-windows"', '')
+Throws 'old browser must reopen before the background capture flags take effect' { Get-ProfileBrowser }
 $owner.CommandLine = $command
 $script:processes = @($owner, $owner)
 Throws 'duplicate profile owners fail safely' { Get-ProfileBrowser }
