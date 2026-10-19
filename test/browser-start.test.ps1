@@ -79,6 +79,11 @@ $script:waitReady = $false
 Stop-BrowserHelper $stopping
 Check 'unresponsive owned helper is terminated before retry' $script:killed
 function Initialize-BrowserNative { }
+function New-Object {
+    param($TypeName, [Parameter(ValueFromRemainingArguments = $true)] $Arguments)
+    if ($TypeName -ne 'Threading.Mutex') { throw "Unexpected object in launcher lifecycle test: $TypeName" }
+    Microsoft.PowerShell.Utility\New-Object Threading.Mutex($false, ('Local\PartyVisuals-Browser-Test-' + [guid]::NewGuid().ToString('N')))
+}
 function New-Item { param($ItemType, $Path, [switch] $Force) }
 function Start-BrowserHelper { $script:events += 'helper-start'; return [pscustomobject]@{ HasExited = $false } }
 function Stop-BrowserHelper { param($Process); if ($null -ne $Process) { $script:events += 'helper-stop' } }
