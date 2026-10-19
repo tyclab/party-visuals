@@ -169,6 +169,13 @@ show ignores it, so the switch is instant. Both switches can be combined and
 can be added to the "PartyVisuals Browser" task's arguments.
 The launcher lets the helper negotiate its default capture rate with the lightshow
 (`-Fps 0`, the default).
+The dedicated profile disables Chrome's occlusion backgrounding, renderer priority
+reduction and background timer throttling so a visible visualizer continues
+capturing when another window takes focus. This applies only to the dedicated
+profile. After updating these launch flags, close that browser window once before
+restarting the task; the launcher refuses to adopt a window with the old flags.
+The profile, login and saved window placement stay in place.
+
 With Tyclab Lightshow's updated helper this targets 44 fps; older helpers retain
 their defaults. Optional `-Fps 60` requests up to 60 captures per second from a
 matching helper/server release. Actual refresh depends on capture and delivery
@@ -290,7 +297,7 @@ flowchart LR
   Logon[Windows user logon] --> NodeTask[NodeCG task]
   NodeTask --> Mirror
   Logon --> BrowserTask[Browser task]
-  BrowserTask --> Browser[Fullscreen Music Assistant browser]
+  BrowserTask --> Browser[Fullscreen Music Assistant / continuous background capture]
   Music[Music Assistant PCM] --> Browser
   BrowserTask --> Helper[Local browser helper]
   Helper -->|Negotiated latest-frame pixel input| Lightshow

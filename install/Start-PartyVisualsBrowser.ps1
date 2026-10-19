@@ -50,6 +50,9 @@ function Get-BrowserArguments {
     @('--user-data-dir=' + $BrowserProfile)
     '--remote-debugging-address=127.0.0.1'
     '--remote-debugging-port=0'
+    '--disable-backgrounding-occluded-windows'
+    '--disable-renderer-backgrounding'
+    '--disable-background-timer-throttling'
     '--no-first-run'
     '--no-default-browser-check'
     '--start-fullscreen'
@@ -85,7 +88,8 @@ function Get-ProfileBrowser {
         if ($dirs.Count -ne 1) { continue }
         $directory = [IO.Path]::GetFullPath($dirs[0].Substring(16)).TrimEnd('\')
         if ($directory -ine $profile -or @($args | Where-Object { $_ -like '--type=*' }).Count -gt 0) { continue }
-        if ($args -notcontains '--remote-debugging-port=0' -or $args -notcontains '--remote-debugging-address=127.0.0.1' -or $args -notcontains ('--app=' + $VisualizerUrl)) {
+        $captureFlags = @('--disable-backgrounding-occluded-windows', '--disable-renderer-backgrounding', '--disable-background-timer-throttling')
+        if ($args -notcontains '--remote-debugging-port=0' -or $args -notcontains '--remote-debugging-address=127.0.0.1' -or $args -notcontains ('--app=' + $VisualizerUrl) -or @($captureFlags | Where-Object { $args -notcontains $_ }).Count) {
             throw 'The dedicated browser profile is already open with different launch options. Close that profile before starting this task.'
         }
         Get-Process -Id $candidate.ProcessId -ErrorAction SilentlyContinue
