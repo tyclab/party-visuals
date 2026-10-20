@@ -151,7 +151,8 @@ Start-ScheduledTask -TaskName 'PartyVisuals Browser'
 
 `-Register` replaces a task of that name. The task runs Windows PowerShell hidden
 with this launcher and the other arguments given to `-Register`, with limited
-privileges and no time limit, at this user's logon and whenever the session
+privileges, normal priority (Task Scheduler's default starts it below normal) and
+no time limit, at this user's logon and whenever the session
 connects at the console or over Remote Desktop or is unlocked. It ignores
 duplicate starts, starts when available and retries failures every minute. After
 replacing the launcher file, stop and start the task once (`Stop-ScheduledTask`,

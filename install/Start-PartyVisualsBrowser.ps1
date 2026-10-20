@@ -291,6 +291,7 @@ function Get-TaskXml([string] $User, [string] $Arguments) {
     $shell = [Security.SecurityElement]::Escape("$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe")
     $line = [Security.SecurityElement]::Escape($Arguments)
     $folder = [Security.SecurityElement]::Escape((Split-Path -Parent $LauncherPath))
+    # Without a priority the task starts below normal, and Chrome's browser, audio and network processes inherit that.
     @"
 <?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
@@ -306,6 +307,7 @@ $($sessionTriggers -join "`r`n")
     <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
     <StartWhenAvailable>true</StartWhenAvailable>
     <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>5</Priority>
     <RestartOnFailure><Interval>PT1M</Interval><Count>999</Count></RestartOnFailure>
   </Settings>
   <Actions Context="Author"><Exec><Command>$shell</Command><Arguments>$line</Arguments><WorkingDirectory>$folder</WorkingDirectory></Exec></Actions>
