@@ -78,7 +78,7 @@ EclipseGraphics' panels.
 | File | |
 |---|---|
 | [`Install-PartyVisuals.ps1`](install/Install-PartyVisuals.ps1) | Installs EclipseGraphics and this bundle at pinned commits, keeps NodeCG to this machine, stores the lightshow token and, with `-Autostart`, starts NodeCG at logon. Windows PowerShell 5.1 or PowerShell 7. |
-| [`Start-PartyVisualsBrowser.ps1`](install/Start-PartyVisualsBrowser.ps1) | Opens the visualizer fullscreen in a dedicated Chrome profile and supervises the local browser helper until the window closes. |
+| [`Start-PartyVisualsBrowser.ps1`](install/Start-PartyVisualsBrowser.ps1) | Opens the visualizer fullscreen in a dedicated Chrome profile, reopens it after it closes or the session moves, and supervises the local browser helper. `-Register`, `-Stop` and `-Resume` manage its task. |
 | [`companion-page.md`](install/companion-page.md) | A Companion page with the lightshow's buttons and the visuals' side by side. |
 
 From a normal (not elevated) PowerShell window, as the Windows user who runs the show:
@@ -140,12 +140,45 @@ in that folder. Copy `Start-PartyVisualsBrowser.ps1` into the local startup fold
 The default player URL selects SHD; configure `-VisualizerUrl` for another player.
 Sign in to Music Assistant once in the dedicated browser profile.
 
-Register one **PartyVisuals Browser** task at the intended user's interactive
-logon, running Windows PowerShell with arguments
-`-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "<launcher path>"`.
-Use limited privileges, ignore duplicate starts, remove the execution time limit,
-start when available and retry failures every minute. Closing the window ends the
-task; run the task again to reopen it.
+As the user who runs the show, register the **PartyVisuals Browser** task from the
+copied launcher, with the output switches the task should use, and start it:
+
+```
+$launcher = "$env:LOCALAPPDATA\PartyVisuals\startup\Start-PartyVisualsBrowser.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File $launcher -Register -Room -Curtain
+Start-ScheduledTask -TaskName 'PartyVisuals Browser'
+```
+
+`-Register` replaces a task of that name. The task runs Windows PowerShell hidden
+with this launcher and the other arguments given to `-Register`, with limited
+privileges, normal priority (Task Scheduler's default starts it below normal) and
+no time limit, at this user's logon and whenever the session
+connects at the console or over Remote Desktop or is unlocked. It ignores
+duplicate starts, starts when available and retries failures every minute. After
+replacing the launcher file, stop and start the task once (`Stop-ScheduledTask`,
+`Start-ScheduledTask`); the open window is adopted, not reopened.
+
+The launcher keeps the visuals open. When the window closes, whether by a crash,
+the session or a click, it reopens it after 5 seconds; while it keeps closing
+within a minute of opening, the pause doubles up to 5 minutes. The local helper
+keeps running meanwhile. When the session moves between the console and Remote
+Desktop, the launcher closes the window once the new connection has settled for
+10 seconds and opens a fresh one: a Chrome started for the previous display keeps
+rendering at a fraction of the screen's refresh. Locking, unlocking and
+disconnecting leave the window as it is. It closes the window, not the process,
+so Chrome remembers where it was.
+
+To close the visuals on purpose, and to bring them back:
+
+```
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\PartyVisuals\startup\Start-PartyVisualsBrowser.ps1" -Stop
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\PartyVisuals\startup\Start-PartyVisualsBrowser.ps1" -Resume
+```
+
+After `-Stop` they stay closed, across session moves and task restarts, until
+`-Resume` (which starts the task) or the next sign-in. The stop is the file
+`%LOCALAPPDATA%\PartyVisuals\browser-visuals.stop`. `Stop-ScheduledTask` alone
+leaves the window open, and the next session connect or unlock starts the task again.
 
 The launcher sets no screen or window size. Chrome reopens the app window on the
 screen where it was last closed, so put it where it belongs once: leave fullscreen
@@ -166,7 +199,7 @@ Optional `-Room` streams the same picture as one colour per lamp cell, read at
 each cell's place on the lightshow's plan, for the lightshow's **Picture:
 Visualizer** selector (Perform or Settings → Show); with **Effects** selected the
 show ignores it, so the switch is instant. Both switches can be combined and
-can be added to the "PartyVisuals Browser" task's arguments.
+are given to `-Register` for the "PartyVisuals Browser" task.
 The launcher lets the helper negotiate its default capture rate with the lightshow
 (`-Fps 0`, the default).
 The dedicated profile disables Chrome's occlusion backgrounding, renderer priority
@@ -306,7 +339,8 @@ flowchart LR
   Logon[Windows user logon] --> NodeTask[NodeCG task]
   NodeTask --> Mirror
   Logon --> BrowserTask[Browser task]
-  BrowserTask --> Browser[Fullscreen Music Assistant / continuous background capture]
+  Session[Console / Remote Desktop connect, unlock] --> BrowserTask
+  BrowserTask -->|Reopen after exit or session move, until -Stop| Browser[Fullscreen Music Assistant / continuous background capture]
   Music[Music Assistant PCM] --> Browser
   BrowserTask --> Helper[Local browser helper]
   Helper -->|Negotiated latest-frame pixel input| Lightshow
@@ -390,7 +424,9 @@ machine. `shared/` is loaded both by the extension and, as plain scripts, by the
 On Windows, `powershell -NoProfile -ExecutionPolicy Bypass -File test\install.test.ps1`
 checks the install script in a folder under `%TEMP%`: the token file, the configuration
 merges and the install folder checks. It installs nothing and registers no task.
-`test\browser-start.test.ps1` checks display identity, process ownership and browser/helper recovery with mocked Windows calls.
+`test\browser-start.test.ps1` checks display identity, process ownership, browser/helper recovery,
+the reopen pauses, `-Stop`/`-Resume` and the task definition with mocked Windows calls. It has
+Task Scheduler validate the definition without registering it and leaves a running visuals task alone.
 
 ## Licence
 
