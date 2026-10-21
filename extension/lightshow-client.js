@@ -26,21 +26,21 @@ const { audioFrame } = require('../shared/audio.js');
 
 const PROTOCOL = 2;
 
-/** The lightshow's address, checked: http(s), and no credentials in it. */
+/** The engine's address, checked: http(s), and no credentials in it. */
 function parseTarget(raw) {
   let url;
   try {
     url = new URL(String(raw || ''));
   } catch {
-    return { error: 'no valid lightshow address in the bundle config (lightshow.url)' };
+    return { error: 'no valid engine address in the bundle config (lightshow.url)' };
   }
   if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-    return { error: 'the lightshow address (lightshow.url) must start with http:// or https://' };
+    return { error: 'the engine address (lightshow.url) must start with http:// or https://' };
   }
   // The bundle config is served to every page of the bundle, so a secret in
   // the address would be readable by anything that can open a graphic.
   if (url.username || url.password || url.searchParams.has('token')) {
-    return { error: 'the lightshow address (lightshow.url) carries credentials; put the token in lightshow.tokenFile' };
+    return { error: 'the engine address (lightshow.url) carries credentials; put the token in lightshow.tokenFile' };
   }
   const base = url.pathname.replace(/\/+$/, '');
   return { origin: url.origin, base, display: url.origin + base };
@@ -149,12 +149,12 @@ class LightshowClient extends EventEmitter {
       if (err && err.data && err.data.code === 'unauthorized') {
         // Polling with the same token would be refused too; retrying the
         // socket is enough to notice when the token is accepted again.
-        this.refused = `the lightshow refused the token: ${this._clean(err.message)}`;
+        this.refused = `the engine refused the token: ${this._clean(err.message)}`;
       } else {
         // A transport failure, or the handshake refused for the host name:
         // one poll tells which, and the poll stops again if it is refused.
         this.refused = null;
-        this.socketError = `cannot reach the lightshow's socket: ${this._clean(err && err.message)}`;
+        this.socketError = `cannot reach the engine's socket: ${this._clean(err && err.message)}`;
         this._startPolling();
       }
       this._retryLater();
@@ -162,7 +162,7 @@ class LightshowClient extends EventEmitter {
     socket.on('disconnect', (reason) => {
       this.socketUp = false;
       this.attempted = true;
-      this.socketError = `the lightshow's socket closed (${this._clean(reason)})`;
+      this.socketError = `the engine's socket closed (${this._clean(reason)})`;
       this._startPolling();
       this._retryLater();
     });
@@ -234,13 +234,13 @@ class LightshowClient extends EventEmitter {
         // An unread body holds the connection open until it is collected.
         await res.body?.cancel();
         this.httpUp = false;
-        this.refused = 'the lightshow refused the token (HTTP 401)';
+        this.refused = 'the engine refused the token (HTTP 401)';
       } else if (res.status === 403) {
         // The lightshow answers 403 before it looks at the token: to a host
         // name it is not known by, or to a browser's cross-origin request.
         await res.body?.cancel();
         this.httpUp = false;
-        this.refused = 'the lightshow refused the request (HTTP 403): it does not answer to this host name; set it as its Public URL';
+        this.refused = 'the engine refused the request (HTTP 403): it does not answer to this host name; set it as its Public URL';
       } else if (!res.ok) {
         await res.body?.cancel();
         this.httpUp = false;
