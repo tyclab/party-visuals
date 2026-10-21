@@ -55,6 +55,16 @@ $Curtain = $false
 $Room = $false
 $helperArgs = @(Get-HelperArguments)
 Check 'display-only mode does not request pixel captures' ($helperArgs -notcontains '--fps')
+$Panels = '38:20x6,39:20x6'
+$helperArgs = @(Get-HelperArguments)
+Check 'panel-only mode carries its grids, configuration and telemetry once' (($helperArgs -join '|') -match '\|--panels\|38:20x6,39:20x6\|--nodecg-config\|' -and @($helperArgs | Where-Object { $_ -eq '--telemetry-file' }).Count -eq 1 -and ($helperArgs -join '|').EndsWith('|--fps|60'))
+$Curtain = $true
+$Room = $true
+$helperArgs = @(Get-HelperArguments)
+Check 'panels coexist with curtain and room in one helper invocation' ($helperArgs -contains '--curtain' -and $helperArgs -contains '--room' -and $helperArgs -contains '--panels' -and @($helperArgs | Where-Object { $_ -eq '--nodecg-config' }).Count -eq 1 -and @($helperArgs | Where-Object { $_ -eq '--fps' }).Count -eq 1)
+$Curtain = $false
+$Room = $false
+$Panels = ''
 $Fps = 0
 
 Check 'the session record matches the Windows WTSINFOW layout' ([Runtime.InteropServices.Marshal]::SizeOf([type]'PartyBrowserNative+SessionInfo') -eq 216)
@@ -104,7 +114,7 @@ $script:closeExits = $true
 Check 'the launcher knows its own file for the task' ($LauncherPath -eq $launcherFile)
 $script:registered = $null
 function Register-ScheduledTask { param($TaskName, $Xml, [switch] $Force); $script:registered = @{ Name = $TaskName; Xml = $Xml; Force = [bool]$Force } }
-$bound = @{ Register = [switch]$true; Stop = [switch]$false; TaskName = 'other'; Verbose = [switch]$true; Room = [switch]$true; Curtain = [switch]$true; Fps = 60; VisualizerUrl = 'http://h.test/#/?a=1&b=2' }
+$bound = @{ Register = [switch]$true; Stop = [switch]$false; TaskName = 'other'; Verbose = [switch]$true; Room = [switch]$true; Curtain = [switch]$true; Fps = 60; Panels = '38:20x6,39:20x6'; VisualizerUrl = 'http://h.test/#/?a=1&b=2' }
 Check 'registration succeeds' ((Register-VisualsTask $bound) -eq 0)
 $task = ([xml]$script:registered.Xml).Task
 $user = [Security.Principal.WindowsIdentity]::GetCurrent().Name
@@ -114,7 +124,7 @@ Check 'the task ignores duplicates, has no time limit and retries failures every
 Check 'the task runs at normal priority, not the Task Scheduler default below normal' ($task.Settings.Priority -eq '5')
 Check 'the task runs on this user''s interactive desktop with limited rights' ($task.Principals.Principal.UserId -eq $user -and $task.Principals.Principal.LogonType -eq 'InteractiveToken' -and $task.Principals.Principal.RunLevel -eq 'LeastPrivilege')
 Check 'the task runs this launcher hidden in Windows PowerShell' ($task.Actions.Exec.Command -eq "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -and $task.Actions.Exec.WorkingDirectory -eq (Split-Path -Parent $launcherFile))
-Check 'the task keeps the launch options but not the management switches' ($task.Actions.Exec.Arguments -ceq ('-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $launcherFile + '" -Curtain -Fps "60" -Room -VisualizerUrl "http://h.test/#/?a=1&b=2"'))
+Check 'the task keeps the launch options but not the management switches' ($task.Actions.Exec.Arguments -ceq ('-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "' + $launcherFile + '" -Curtain -Fps "60" -Panels "38:20x6,39:20x6" -Room -VisualizerUrl "http://h.test/#/?a=1&b=2"'))
 $scheduler = New-Object -ComObject Schedule.Service
 $scheduler.Connect()
 $validated = $true

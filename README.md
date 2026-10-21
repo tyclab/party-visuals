@@ -145,7 +145,7 @@ copied launcher, with the output switches the task should use, and start it:
 
 ```
 $launcher = "$env:LOCALAPPDATA\PartyVisuals\startup\Start-PartyVisualsBrowser.ps1"
-powershell -NoProfile -ExecutionPolicy Bypass -File $launcher -Register -Room -Curtain
+powershell -NoProfile -ExecutionPolicy Bypass -File $launcher -Register -Room -Curtain -Panels "38:20x6,39:20x6"
 Start-ScheduledTask -TaskName 'PartyVisuals Browser'
 ```
 
@@ -198,8 +198,11 @@ it never arms the rig. Follow the ArtNet helper documentation before enabling it
 Optional `-Room` streams the same picture as one colour per lamp cell, read at
 each cell's place on the lightshow's plan, for the lightshow's **Picture:
 Visualizer** selector (Perform or Settings → Show); with **Effects** selected the
-show ignores it, so the switch is instant. Both switches can be combined and
-are given to `-Register` for the "PartyVisuals Browser" task.
+show ignores it, so the switch is instant. Add `-Panels "38:20x6,39:20x6"` to stream the complete visualizer image to
+additional grid fixtures, such as the two GLORBs, using their existing WLED maps.
+Each panel keeps an independent lease; all outputs use the same supervised helper
+and browser, and equal grid sizes share captures. Combine these options and
+give them to `-Register` for the "PartyVisuals Browser" task.
 The launcher lets the helper negotiate its default capture rate with the lightshow
 (`-Fps 0`, the default).
 The dedicated profile disables Chrome's occlusion backgrounding, renderer priority
@@ -400,7 +403,8 @@ flowchart LR
   BrowserTask -->|Reopen after exit or session move, until -Stop| Browser[Fullscreen Music Assistant / continuous background capture]
   Music[Music Assistant PCM] --> Browser
   BrowserTask --> Helper[Local browser helper]
-  Helper -->|Negotiated latest-frame pixel input| Lightshow
+  Helper -->|Independent curtain and panel leases; shared captures| Lightshow
+  Helper -->|Room picture input| Lightshow
   Helper -.->|30-second bounded summaries| Logs[Existing Alloy / Loki]
   Replicants -->|Visual on/off| Helper
   Helper -->|Display visibility| Browser
