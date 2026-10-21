@@ -10,6 +10,8 @@ param(
     [string] $TelemetryFile = "$env:LOCALAPPDATA\PartyVisuals\logs\browser-visuals.ndjson",
     [switch] $Curtain,
     [switch] $Room,
+    [ValidatePattern('^(?:[0-9]+:[0-9]+x[0-9]+)(?:,[0-9]+:[0-9]+x[0-9]+)*$|^$')]
+    [string] $Panels = '',
     [ValidateRange(0, 60)]
     [int] $Fps = 0,
     [string] $NodecgConfig = "$env:LOCALAPPDATA\PartyVisuals\EclipseGraphics\cfg\party-visuals.json",
@@ -87,18 +89,22 @@ function Get-HelperArguments {
     '--visualizer-url'; $VisualizerUrl
     '--controls-url'; $ControlsUrl
     '--parent-pid'; [string]$PID
-    if ($Curtain -or $Room) { '--telemetry-file'; $TelemetryFile }
+    if ($Curtain -or $Room -or $Panels) { '--telemetry-file'; $TelemetryFile }
     if ($Curtain) {
         '--curtain'; '--nodecg-config'; $NodecgConfig
         '--fixture'; [string]$Fixture
         '--width'; '68'; '--height'; '42'; '--fit'; 'cover'
     }
     if ($Room) {
-        # The room picture rides the same lightshow connection; the configuration path is given once.
+        # All output connections read the same configuration file.
         '--room'
         if (-not $Curtain) { '--nodecg-config'; $NodecgConfig }
     }
-    if (($Curtain -or $Room) -and $Fps -gt 0) { '--fps'; [string]$Fps }
+    if ($Panels) {
+        '--panels'; $Panels
+        if (-not $Curtain -and -not $Room) { '--nodecg-config'; $NodecgConfig }
+    }
+    if (($Curtain -or $Room -or $Panels) -and $Fps -gt 0) { '--fps'; [string]$Fps }
 }
 
 function Get-ProfileBrowser {
@@ -197,7 +203,7 @@ function Start-VisualsBrowser {
     foreach ($path in @($ChromeExe, $NodeExe, $HelperPath)) {
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required executable or helper is missing: $path" }
     }
-    if (($Curtain -or $Room) -and -not (Test-Path -LiteralPath $NodecgConfig -PathType Leaf)) { throw 'The lightshow output configuration is missing.' }
+    if (($Curtain -or $Room -or $Panels) -and -not (Test-Path -LiteralPath $NodecgConfig -PathType Leaf)) { throw 'The lightshow output configuration is missing.' }
     $profile = [IO.Path]::GetFullPath($BrowserProfile).TrimEnd('\')
     $normalProfile = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'Google\Chrome\User Data')).TrimEnd('\')
     if ($profile -ieq $normalProfile -or $profile.StartsWith($normalProfile + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'A separate PartyVisuals browser profile is required; the normal Chrome profile is not supported.' }
