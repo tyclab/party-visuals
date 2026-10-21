@@ -26,8 +26,10 @@ already in place is left as it is.
   5. Asks for the lightshow's access token (the input is hidden) and writes it
      to cfg\party-visuals.token, readable by the current user only. The token
      is not shown, logged or passed to another program.
-  6. With -Autostart, registers a scheduled task that starts NodeCG when this
-     user logs on.
+  6. With -Autostart, copies Start-PartyVisualsNodecg.ps1 to <Root>\startup
+     and registers its scheduled task: at this user's logon it starts NodeCG
+     without a window, restarts it after any exit and logs its output to
+     <Root>\logs\nodecg.log.
 
 -WhatIf shows what would change and changes nothing. -Uninstall removes the
 scheduled task and the whole <Root> folder; it refuses a folder this script
@@ -51,7 +53,7 @@ The party-visuals commit (40 hex digits) or release tag (vX.Y.Z) to install.
 Ask for the lightshow token again and replace the stored one.
 
 .PARAMETER Autostart
-Register (or update) the scheduled task that starts NodeCG at logon.
+Register (or update) the scheduled task that keeps NodeCG running from logon.
 
 .PARAMETER Uninstall
 Remove the scheduled task and the install folder, if this script set it up.
@@ -110,6 +112,8 @@ $NativePackage = 'better-sqlite3'
 $NpmAllowScriptsSince = [version]'11.16.0'
 $TokenFileSetting = 'cfg/party-visuals.token'
 $StampName = '.party-visuals-install'
+$LauncherSource = Join-Path $PSScriptRoot 'Start-PartyVisualsNodecg.ps1'
+$WindowsPowerShell = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
 
 # ---------------------------------------------------------------- helpers
 
@@ -295,7 +299,7 @@ function Test-PortListening([int] $Port) {
 
 function Assert-NodecgStopped([string] $Why) {
     if (-not (Test-PortListening $NodecgPort)) { return }
-    $msg = "Something listens on port ${NodecgPort}: NodeCG still running? Stop it first (Stop-ScheduledTask -TaskName '$TaskName', or close its window), then run again; $Why"
+    $msg = "Something listens on port ${NodecgPort}: NodeCG still running? Stop it first (Start-PartyVisualsNodecg.ps1 -Stop, or Stop-ScheduledTask -TaskName '$TaskName'), then run again; $Why"
     if ($WhatIfPreference) { Write-Warning $msg } else { throw $msg }
 }
 
@@ -579,18 +583,19 @@ function Set-Token {
 }
 
 function Register-Autostart {
+    # The launcher writes the task, so -Autostart and the launcher's own -Register give the same one.
     [CmdletBinding(SupportsShouldProcess = $true)]
-    param([string] $Node, [string] $StartScript, [string] $WorkDir)
-    $user = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
-    $what = "register: at $user's logon, run `"$Node`" `"$StartScript`" (NodeCG on ${NodecgHost}:$NodecgPort)"
+    param([string] $Node, [string] $InstallRoot)
+    $launcher = [System.IO.Path]::Combine($InstallRoot, 'startup', 'Start-PartyVisualsNodecg.ps1')
+    $what = "copy $LauncherSource to $launcher and register: from logon, keep NodeCG running (NodeCG on ${NodecgHost}:$NodecgPort)"
     if (-not $PSCmdlet.ShouldProcess("scheduled task '$TaskName'", $what)) { return }
-    $action = New-ScheduledTaskAction -Execute $Node -Argument ('"{0}"' -f $StartScript) -WorkingDirectory $WorkDir
-    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $user
-    $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited
-    # No time limit: the default would stop NodeCG after three days.
-    $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit ([TimeSpan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -MultipleInstances IgnoreNew -StartWhenAvailable -RestartCount 999 -RestartInterval (New-TimeSpan -Minutes 1)
-    Register-ScheduledTask -TaskName $TaskName -Description 'NodeCG with EclipseGraphics and party-visuals, on 127.0.0.1:9090 (Install-PartyVisuals.ps1)' -Action $action -Trigger $trigger -Principal $principal -Settings $settings -Force | Out-Null
-    Write-Detail "scheduled task '$TaskName' registered"
+    if (-not (Test-Path -LiteralPath $LauncherSource -PathType Leaf)) { throw "$LauncherSource is missing; run this script from a party-visuals checkout." }
+    New-Item -ItemType Directory -Path (Split-Path -Parent $launcher) -Force -Confirm:$false | Out-Null
+    Copy-Item -LiteralPath $LauncherSource -Destination $launcher -Force -Confirm:$false
+    Invoke-Native $WindowsPowerShell @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $launcher, '-Register', '-TaskName', $TaskName,
+        '-NodeExe', $Node, '-NodecgRoot', (Join-Path $InstallRoot 'EclipseGraphics'),
+        '-LogFile', ([System.IO.Path]::Combine($InstallRoot, 'logs', 'nodecg.log')), '-StopFile', (Join-Path $InstallRoot 'nodecg.stop')) | Out-Null
+    Write-Detail "scheduled task '$TaskName' registered ($launcher)"
 }
 
 function Get-AutostartTask {
@@ -711,11 +716,11 @@ function Invoke-Install {
     if ($Autostart) {
         $node = $tools.Node
         if (-not $node) { $node = 'node.exe' }
-        Register-Autostart -Node $node -StartScript (Join-Path $eg 'start.js') -WorkDir $eg
+        Register-Autostart -Node $node -InstallRoot $Root
     } elseif ($task) {
         Write-Detail "scheduled task '$TaskName' is registered (left as it is)"
     } else {
-        Write-Detail 'none (-Autostart registers a task that starts NodeCG at logon)'
+        Write-Detail 'none (-Autostart registers a task that keeps NodeCG running from logon)'
     }
 
     $base = "http://${NodecgHost}:$NodecgPort"
@@ -754,6 +759,8 @@ function Invoke-Uninstall {
             Stop-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue
             Unregister-ScheduledTask -TaskName $TaskName -Confirm:$false
             Write-Detail "scheduled task '$TaskName' removed"
+            # The launcher lets NodeCG save and exit once its task ends.
+            for ($i = 0; $i -lt 30 -and (Test-PortListening $NodecgPort); $i++) { Start-Sleep -Seconds 1 }
         }
     } elseif ($task) {
         Write-Detail "scheduled task '$TaskName' runs another folder; left as it is"

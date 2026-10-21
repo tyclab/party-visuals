@@ -77,7 +77,8 @@ EclipseGraphics' panels.
 
 | File | |
 |---|---|
-| [`Install-PartyVisuals.ps1`](install/Install-PartyVisuals.ps1) | Installs EclipseGraphics and this bundle at pinned commits, keeps NodeCG to this machine, stores the lightshow token and, with `-Autostart`, starts NodeCG at logon. Windows PowerShell 5.1 or PowerShell 7. |
+| [`Install-PartyVisuals.ps1`](install/Install-PartyVisuals.ps1) | Installs EclipseGraphics and this bundle at pinned commits, keeps NodeCG to this machine, stores the lightshow token and, with `-Autostart`, keeps NodeCG running from logon. Windows PowerShell 5.1 or PowerShell 7. |
+| [`Start-PartyVisualsNodecg.ps1`](install/Start-PartyVisualsNodecg.ps1) | Runs NodeCG without a window, starts it again after any exit, and logs its output and exit codes. `-Register`, `-Stop` and `-Resume` manage its task. |
 | [`Start-PartyVisualsBrowser.ps1`](install/Start-PartyVisualsBrowser.ps1) | Opens the visualizer fullscreen in a dedicated Chrome profile, reopens it after it closes or the session moves, and supervises the local browser helper. `-Register`, `-Stop` and `-Resume` manage its task. |
 | [`companion-page.md`](install/companion-page.md) | A Companion page with the lightshow's buttons and the visuals' side by side. |
 
@@ -113,11 +114,9 @@ What the script does:
    included.
 5. Writes the token to `cfg\party-visuals.token`, readable by this Windows user only
    (inheritance off, one rule). It is not shown, logged or put on a command line.
-6. With `-Autostart`, registers the scheduled task **PartyVisuals NodeCG**, which runs
-   EclipseGraphics' `start.js` at this user's logon in a console window; closing the
-   window stops its current process. The task ignores duplicate starts, has no time
-   limit, starts when a missed trigger becomes available, and retries a failed process
-   every minute up to 999 times. Use `Stop-ScheduledTask` for an intentional stop.
+6. With `-Autostart`, copies `Start-PartyVisualsNodecg.ps1` to
+   `%LOCALAPPDATA%\PartyVisuals\startup` and registers its scheduled task
+   **PartyVisuals NodeCG** ([Keeping NodeCG running](#keeping-nodecg-running)).
 
 It can be run again: what is in place is kept, and the packages are installed again
 only when a lockfile or the Node.js major version changed. `-NewToken` asks for the token again,
@@ -125,8 +124,9 @@ only when a lockfile or the Node.js major version changed. `-NewToken` asks for 
 or a `vX.Y.Z` tag) move the pins, and `-Uninstall` removes the task and the folder, only
 a folder the script set up (its marker file in it) and not one reached through a link.
 NodeCG reads its configuration and the token when it starts, so restart it after a
-change. The rest is in the script's help, read with the execution policy bypassed as
-for the run (a plain `Get-Help` finds nothing while the policy blocks scripts):
+change (`Stop-ScheduledTask`, then `Start-ScheduledTask`). The rest is in the script's
+help, read with the execution policy bypassed as for the run (a plain `Get-Help` finds
+nothing while the policy blocks scripts):
 
 ```
 powershell -ExecutionPolicy Bypass -Command "Get-Help .\Install-PartyVisuals.ps1 -Detailed"
@@ -233,6 +233,62 @@ address's host name has to be one the lightshow answers to (its machine name, an
 address, or its **Public URL**), or the lightshow answers 403 and the panel says so
 ([The network](#the-network)).
 
+### Keeping NodeCG running
+
+The **PartyVisuals NodeCG** task runs the launcher at this user's logon with limited
+privileges, normal priority (Task Scheduler's default starts it below normal) and no
+time limit. It ignores duplicate starts, starts when available and retries a failed
+start every minute. It runs Windows PowerShell inside a headless console host, so
+neither the launcher nor NodeCG has a window. A console of NodeCG's own would be a
+terminal window under Windows Terminal, where Ctrl+C ends NodeCG with exit code 0 and
+the terminal then closes the window.
+
+The launcher starts EclipseGraphics' `start.js` and starts it again whenever it exits,
+with any exit code, after 5 seconds; while it keeps exiting within ten minutes of
+starting (NodeCG itself takes about a minute to start), the pause doubles up to 5
+minutes. Task Scheduler's restart-on-failure does not restart NodeCG when it exits,
+whether with code 0 or 1.
+
+NodeCG's output, and each start and exit with its time and exit code, go to
+`%LOCALAPPDATA%\PartyVisuals\logs\nodecg.log`, at most two 1 MiB files
+(`nodecg.log.1` is the older). Each line starts with the UTC time and `launcher`,
+`stdout` or `stderr`. Exit code 0 is a clean shutdown, the one Ctrl+C or a stop gives;
+1 is NodeCG giving up on an error, which it logs just before. NodeCG's own
+`logs\nodecg.log` in the EclipseGraphics folder stays empty: NodeCG's file logging is
+off by default.
+
+When NodeCG cannot listen on its port, a launcher line says so before the exit, with
+the port and the error: `EACCES` when Windows reserves or blocks the port, `EADDRINUSE`
+when a program holds it. Windows reserves port blocks inside its dynamic port range
+(`netsh int ipv4 show dynamicport tcp`), and
+`netsh int ipv4 show excludedportrange protocol=tcp` lists them; a range that reaches
+9090 blocks NodeCG. The launcher keeps retrying with the same pauses.
+
+To stop NodeCG on purpose, and to bring it back:
+
+```
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\PartyVisuals\startup\Start-PartyVisualsNodecg.ps1" -Stop
+powershell -NoProfile -ExecutionPolicy Bypass -File "$env:LOCALAPPDATA\PartyVisuals\startup\Start-PartyVisualsNodecg.ps1" -Resume
+```
+
+`-Stop` closes NodeCG's standard input, which shuts it down as Ctrl+C does (it saves
+its state first), and waits for the launcher to end. NodeCG stays stopped across task
+restarts until `-Resume` (which starts the task) or the next sign-in. The stop is the
+file `%LOCALAPPDATA%\PartyVisuals\nodecg.stop`. `Stop-ScheduledTask` stops NodeCG
+until the next logon. For an install with another `-Root`, give `-Stop` and `-Resume`
+the task's `-NodecgRoot` and `-StopFile`.
+
+To register the task without the installer, from the copied launcher:
+
+```
+$launcher = "$env:LOCALAPPDATA\PartyVisuals\startup\Start-PartyVisualsNodecg.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -File $launcher -Register
+```
+
+`-Register` replaces a task of that name and forwards `-NodeExe`, `-NodecgRoot`,
+`-LogFile` and `-StopFile` when they are given. After replacing the task or the
+launcher file, stop and start the task once.
+
 ## Configuration
 
 `cfg/party-visuals.json` (all optional; [`configschema.json`](configschema.json)
@@ -336,8 +392,9 @@ Each has its JSON schema in `schemas/`.
 
 ```mermaid
 flowchart LR
-  Logon[Windows user logon] --> NodeTask[NodeCG task]
-  NodeTask --> Mirror
+  Logon[Windows user logon] --> NodeTask[NodeCG launcher task]
+  NodeTask -->|Restart after any exit, until -Stop| Mirror
+  NodeTask -.->|Output, starts and exit codes| NodeLog[Rotating nodecg.log]
   Logon --> BrowserTask[Browser task]
   Session[Console / Remote Desktop connect, unlock] --> BrowserTask
   BrowserTask -->|Reopen after exit or session move, until -Stop| Browser[Fullscreen Music Assistant / continuous background capture]
@@ -427,6 +484,10 @@ merges and the install folder checks. It installs nothing and registers no task.
 `test\browser-start.test.ps1` checks display identity, process ownership, browser/helper recovery,
 the reopen pauses, `-Stop`/`-Resume` and the task definition with mocked Windows calls. It has
 Task Scheduler validate the definition without registering it and leaves a running visuals task alone.
+`test\nodecg-start.test.ps1` runs the NodeCG launcher against a stand-in NodeCG under `%TEMP%`
+(Node.js required): the output and exit log and its rotation, the clean stop, restarts and their
+pauses, `-Stop`/`-Resume`, the end of the task and the task definition, validated by Task Scheduler
+and not registered. It leaves a running NodeCG task alone.
 
 ## Licence
 

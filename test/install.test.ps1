@@ -85,26 +85,34 @@ try {
     }
     Check 'the scheduled task of the folder is recognised' (Test-TaskUsesRoot (& $taskOf 'C:\Users\show\AppData\Local\PartyVisuals') 'C:\Users\show\AppData\Local\PartyVisuals')
     Check 'the task of a folder whose name only starts the same is not' (-not (Test-TaskUsesRoot (& $taskOf 'C:\Users\show\AppData\Local\PartyVisuals2') 'C:\Users\show\AppData\Local\PartyVisuals'))
+    $launcherTask = New-Object PSObject -Property @{ Actions = @(New-Object PSObject -Property @{
+        Arguments = '--headless "C:\WINDOWS\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "C:\Users\show\AppData\Local\PartyVisuals\startup\Start-PartyVisualsNodecg.ps1" -NodecgRoot "C:\Users\show\AppData\Local\PartyVisuals\EclipseGraphics"'
+        WorkingDirectory = 'C:\Users\show\AppData\Local\PartyVisuals\startup' }) }
+    Check 'the launcher task of the folder is recognised' (Test-TaskUsesRoot $launcherTask 'C:\Users\show\AppData\Local\PartyVisuals')
 
-    Import-Module ScheduledTasks
-    $script:registeredTask = $null
+    # A stand-in launcher with the real one's parameters records what -Autostart hands it.
+    $stand = Join-Path $work 'stand-in launcher'
+    New-Item -ItemType Directory -Path $stand | Out-Null
+    $realLauncher = $LauncherSource
+    $LauncherSource = Join-Path $stand 'Start-PartyVisualsNodecg.ps1'
+    [System.IO.File]::WriteAllText($LauncherSource, "param([string] `$NodeExe, [string] `$NodecgRoot, [string] `$LogFile, [string] `$StopFile, [string] `$TaskName, [switch] `$Stop, [switch] `$Resume, [switch] `$Register)`r`n" +
+        "`$PSBoundParameters.Keys | Sort-Object | ForEach-Object { '{0}={1}' -f `$_, `$PSBoundParameters[`$_] } | Set-Content -LiteralPath (Join-Path `$PSScriptRoot 'bound.txt') -Encoding UTF8`r`n")
     $originalTaskName = $TaskName
     $TaskName = 'PartyVisuals Test ' + [guid]::NewGuid().ToString('N')
-    function Register-ScheduledTask {
-        param($TaskName, $Description, $Action, $Trigger, $Principal, $Settings, [switch] $Force)
-        $script:registeredTask = @{ Name = $TaskName; Action = $Action; Trigger = $Trigger; Principal = $Principal; Settings = $Settings }
-    }
+    $showRoot = Join-Path $work 'show root'
     try {
-        Register-Autostart -Node 'C:\Program Files\nodejs\node.exe' -StartScript "$work\EclipseGraphics\start.js" -WorkDir "$work\EclipseGraphics" -Confirm:$false
-        $t = $script:registeredTask
-        Check 'autostart quotes the script and retains the working directory' ($t.Action.Arguments -eq "`"$work\EclipseGraphics\start.js`"" -and $t.Action.WorkingDirectory -eq "$work\EclipseGraphics")
-        Check 'autostart uses this user''s interactive limited desktop' ($t.Principal.UserId -eq [System.Security.Principal.WindowsIdentity]::GetCurrent().Name -and $t.Principal.LogonType -eq 'Interactive' -and $t.Principal.RunLevel -eq 'Limited')
-        Check 'autostart recovers failures and missed starts without duplicate instances' ($t.Settings.RestartCount -eq 999 -and $t.Settings.RestartInterval -eq 'PT1M' -and $t.Settings.StartWhenAvailable -and $t.Settings.MultipleInstances -eq 'IgnoreNew' -and $t.Settings.ExecutionTimeLimit -eq 'PT0S')
+        Register-Autostart -Node 'C:\Program Files\nodejs\node.exe' -InstallRoot $showRoot -Confirm:$false
+        $copied = [System.IO.Path]::Combine($showRoot, 'startup', 'Start-PartyVisualsNodecg.ps1')
+        Check 'autostart copies the NodeCG launcher into the install folder' ((Test-Path -LiteralPath $copied) -and (Read-Text $copied) -eq (Read-Text $LauncherSource))
+        $bound = @(Get-Content -LiteralPath ([System.IO.Path]::Combine($showRoot, 'startup', 'bound.txt')) -Encoding UTF8) -join '|'
+        $want = @("LogFile=$showRoot\logs\nodecg.log", "NodecgRoot=$showRoot\EclipseGraphics", 'NodeExe=C:\Program Files\nodejs\node.exe', 'Register=True', "StopFile=$showRoot\nodecg.stop", "TaskName=$TaskName") -join '|'
+        Check 'autostart registers through the copied launcher, every path in the install folder' ($bound -eq $want)
         Check 'autostart test registered no real task' (-not (Get-ScheduledTask -TaskName $TaskName -ErrorAction SilentlyContinue))
     } finally {
-        Remove-Item -LiteralPath function:Register-ScheduledTask
+        $LauncherSource = $realLauncher
         $TaskName = $originalTaskName
     }
+    Check 'the installer finds the launcher beside it' ((Test-Path -LiteralPath $LauncherSource) -and (Split-Path -Leaf $LauncherSource) -eq 'Start-PartyVisualsNodecg.ps1')
 
     # ------------------------------------------------------------ the token
 
