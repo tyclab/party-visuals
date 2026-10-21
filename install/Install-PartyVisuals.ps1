@@ -21,9 +21,9 @@ already in place is left as it is.
   3. Clones party-visuals at a pinned commit into
      <Root>\EclipseGraphics\bundles\party-visuals and installs its one package.
   4. Writes cfg\nodecg.json (NodeCG on 127.0.0.1:9090 only) and
-     cfg\party-visuals.json (the lightshow's address and the token file),
+     cfg\party-visuals.json (the engine's address and the token file),
      keeping any other setting already in them.
-  5. Asks for the lightshow's access token (the input is hidden) and writes it
+  5. Asks for the engine's access token (the input is hidden) and writes it
      to cfg\party-visuals.token, readable by the current user only. The token
      is not shown, logged or passed to another program.
   6. With -Autostart, copies Start-PartyVisualsNodecg.ps1 to <Root>\startup
@@ -36,7 +36,7 @@ scheduled task and the whole <Root> folder; it refuses a folder this script
 did not set up (no marker file in it) and a <Root> that is a link.
 
 .PARAMETER LightshowUrl
-The lightshow server, http(s)://host:port, with no token in it. Needed on the
+The TycStation Lightshow engine, http(s)://host:port, with no token in it. Needed on the
 first run; later runs keep the address already configured unless it is given.
 
 .PARAMETER Root
@@ -50,7 +50,7 @@ The EclipseGraphics commit to install (40 hex digits).
 The party-visuals commit (40 hex digits) or release tag (vX.Y.Z) to install.
 
 .PARAMETER NewToken
-Ask for the lightshow token again and replace the stored one.
+Ask for the engine's token again and replace the stored one.
 
 .PARAMETER Autostart
 Register (or update) the scheduled task that keeps NodeCG running from logon.
@@ -276,7 +276,7 @@ function Write-TokenFile {
         [Parameter(Mandatory = $true)] [string] $Path,
         [Parameter(Mandatory = $true)] [System.Security.SecureString] $Token
     )
-    if (-not $PSCmdlet.ShouldProcess($Path, 'write the lightshow token, readable by the current user only')) { return }
+    if (-not $PSCmdlet.ShouldProcess($Path, 'write the engine token, readable by the current user only')) { return }
     $bstr = [System.Runtime.InteropServices.Marshal]::SecureStringToBSTR($Token)
     $plain = $null
     try {
@@ -532,7 +532,7 @@ function Set-NodecgConfig {
 }
 
 function Set-BundleConfig {
-    # The lightshow address and the token file's name; never the token.
+    # The engine address and the token file's name; never the token.
     [CmdletBinding(SupportsShouldProcess = $true)]
     param([string] $Path, [string] $Url)
     $cfg = Read-JsonFile $Path
@@ -549,7 +549,7 @@ function Set-BundleConfig {
     }
     if (-not $Url) { $Url = Get-JsonProperty $lightshow 'url' }
     if (-not $Url) {
-        $msg = 'The lightshow address is not configured yet: pass -LightshowUrl http(s)://<lightshow host>:<port>.'
+        $msg = 'The engine address is not configured yet: pass -LightshowUrl http(s)://<engine host>:<port>.'
         if ($WhatIfPreference) {
             Write-Warning $msg
             $Url = '<LightshowUrl>'
@@ -575,8 +575,8 @@ function Set-Token {
         if (-not (Test-OwnerOnlyAcl $Path)) { Set-OwnerOnlyAcl -Path $Path }
         return
     }
-    if (-not $PSCmdlet.ShouldProcess($Path, 'ask for the lightshow token (hidden input) and write it, readable by the current user only')) { return }
-    Write-Host '    The lightshow token is under Settings > Server & access on the lightshow.'
+    if (-not $PSCmdlet.ShouldProcess($Path, 'ask for the engine token (hidden input) and write it, readable by the current user only')) { return }
+    Write-Host '    The engine''s token is under Settings > Server & access on the TycStation Lightshow engine.'
     $secure = Read-Host -AsSecureString -Prompt '    Lightshow token (hidden)'
     Write-TokenFile -Path $Path -Token $secure -Confirm:$false
     Write-Detail "$Path written, readable by $([System.Security.Principal.WindowsIdentity]::GetCurrent().Name) only (NodeCG reads it when it starts)"

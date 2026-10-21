@@ -1,7 +1,7 @@
 {
   "name": "party-visuals",
   "version": "0.1.0",
-  "description": "Party graphics for OBS that keep time with the lightshow: a NodeCG bundle with a beat-synced colour wash and a pulsing bar, run beside EclipseGraphics.",
+  "description": "TycStation Lightshow party visuals: a NodeCG bundle with a beat-synced colour wash and a pulsing bar that keep time with the engine, run beside EclipseGraphics.",
   "private": true,
   "license": "MIT",
   "homepage": "https://github.com/tyclab/party-visuals",
@@ -29,7 +29,7 @@
         "title": "Party visuals",
         "file": "party.html",
         "width": 3,
-        "headerColor": "#3a1046"
+        "headerColor": "#151724"
       }
     ],
     "graphics": [

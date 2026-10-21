@@ -1,7 +1,7 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema",
   "title": "party-visuals bundle config (cfg/party-visuals.json)",
-  "description": "NodeCG serves this config to every page of the bundle, so it holds no secret: the lightshow token lives in the file lightshow.tokenFile names.",
+  "description": "NodeCG serves this config to every page of the bundle, so it holds no secret: the engine's token lives in the file lightshow.tokenFile names.",
   "type": "object",
   "additionalProperties": false,
   "properties": {
@@ -13,12 +13,12 @@
         "url": {
           "type": "string",
           "default": "http://127.0.0.1:3000",
-          "description": "The lightshow server: http(s)://host:port, with no token or credentials in it."
+          "description": "The engine's address: http(s)://host:port, with no token or credentials in it."
         },
         "tokenFile": {
           "type": "string",
           "default": "",
-          "description": "A file holding the lightshow's access token and nothing else, read by the extension only. Relative to the folder NodeCG runs from. Empty: the lightshow has no token (a loopback bind)."
+          "description": "A file holding the engine's access token and nothing else, read by the extension only. Relative to the folder NodeCG runs from. Empty: the engine has no token (a loopback bind)."
         },
         "pollMs": {
           "type": "integer",

@@ -1,7 +1,7 @@
-# party-visuals
+# TycStation Lightshow — party visuals
 
-Local party display controls and browser graphics that keep time with the lightshow
-([artnet-lightshow](https://github.com/tyclab/artnet-lightshow)). A
+Local party display controls and browser graphics that keep time with the TycStation
+Lightshow engine ([artnet-lightshow](https://github.com/tyclab/artnet-lightshow)). A
 [NodeCG](https://www.nodecg.dev) 2 bundle that runs in the same NodeCG as
 [EclipseGraphics](https://github.com/LightD31/EclipseGraphics): EclipseGraphics draws the
 cards, lower thirds and tickers, this bundle draws what moves with the music behind and
@@ -13,29 +13,29 @@ whichever screen it was last left and follows the existing Companion visual on/o
 part of this workflow. The wash and bar below remain available as optional local
 graphics.
 
-- **Colour wash** (`graphics/wash.html`): the whole frame in the lightshow's palette, to
+- **Colour wash** (`graphics/wash.html`): the whole frame in the engine's palette, to
   sit under EclipseGraphics' cards. The colours turn and flow with the beat; each beat
   lifts the wash a little and swells a glow in the middle.
 - **Beat bar** (`graphics/bar.html`): a band of the palette's colours across the bottom of
   the frame (`?position=top` for the top), scrolling half a block a beat and swelling on
   each beat.
 
-Both are 1920 × 1080 with a transparent background, take the lightshow's palette (its
+Both are 1920 × 1080 with a transparent background, take the engine's palette (its
 palette override when it has one, else the look's colours), and:
 
-- **never pulse faster than 5 Hz**, the photosensitivity limit the lightshow holds its own
+- **never pulse faster than 5 Hz**, the photosensitivity limit the engine holds its own
   strobe to: up to 300 bpm a pulse a beat,
   above that every second or fourth beat, and at
   least 200 ms between two pulses whatever the beat position does;
 - **draw at most `graphics.maxFps` frames a second** (30 by default);
-- **go calm when the lightshow or NodeCG link is gone**: no new pulse, the glow fades
+- **go calm when the engine or NodeCG link is gone**: no new pulse, the glow fades
   within a second, the motion stops where it was and the last colours stay. Graphics
-  require a connected NodeCG socket, a connected lightshow and a beat update less than
+  require a connected NodeCG socket, a connected engine and a beat update less than
   two seconds old. A lost NodeCG socket stops new pulses immediately; missing beat
   updates stop them after two seconds. Reconnecting waits for a fresh beat update and
   eases the beat back in.
 
-The beat comes from the lightshow, not from a tap here. In Reactive mode,
+The beat comes from the engine, not from a tap here. In Reactive mode,
 the graphics can also follow its shared audio hits and energy.
 The wash brightens and expands with the music, and the bar grows with its energy.
 Audio and tempo pulses share one five-pulse-per-second cap. The dashboard reports
@@ -77,25 +77,25 @@ EclipseGraphics' panels.
 
 | File | |
 |---|---|
-| [`Install-PartyVisuals.ps1`](install/Install-PartyVisuals.ps1) | Installs EclipseGraphics and this bundle at pinned commits, keeps NodeCG to this machine, stores the lightshow token and, with `-Autostart`, keeps NodeCG running from logon. Windows PowerShell 5.1 or PowerShell 7. |
+| [`Install-PartyVisuals.ps1`](install/Install-PartyVisuals.ps1) | Installs EclipseGraphics and this bundle at pinned commits, keeps NodeCG to this machine, stores the engine's token and, with `-Autostart`, keeps NodeCG running from logon. Windows PowerShell 5.1 or PowerShell 7. |
 | [`Start-PartyVisualsNodecg.ps1`](install/Start-PartyVisualsNodecg.ps1) | Runs NodeCG without a window, starts it again after any exit, and logs its output and exit codes. `-Register`, `-Stop` and `-Resume` manage its task. |
 | [`Start-PartyVisualsBrowser.ps1`](install/Start-PartyVisualsBrowser.ps1) | Opens the visualizer fullscreen in a dedicated Chrome profile, reopens it after it closes or the session moves, and supervises the local browser helper. `-Register`, `-Stop` and `-Resume` manage its task. |
-| [`companion-page.md`](install/companion-page.md) | A Companion page with the lightshow's buttons and the visuals' side by side. |
+| [`companion-page.md`](install/companion-page.md) | A Companion page with the engine's buttons and the visuals' side by side. |
 
 From a normal (not elevated) PowerShell window, as the Windows user who runs the show:
 
 ```
 git clone https://github.com/tyclab/party-visuals
 cd party-visuals\install
-powershell -ExecutionPolicy Bypass -File .\Install-PartyVisuals.ps1 -LightshowUrl http://<lightshow host>:3000 -Autostart -WhatIf
-powershell -ExecutionPolicy Bypass -File .\Install-PartyVisuals.ps1 -LightshowUrl http://<lightshow host>:3000 -Autostart
+powershell -ExecutionPolicy Bypass -File .\Install-PartyVisuals.ps1 -LightshowUrl http://<engine host>:3000 -Autostart -WhatIf
+powershell -ExecutionPolicy Bypass -File .\Install-PartyVisuals.ps1 -LightshowUrl http://<engine host>:3000 -Autostart
 Start-ScheduledTask -TaskName 'PartyVisuals NodeCG'
 ```
 
 The run with `-WhatIf` lists what would change and changes nothing. The run without it
-asks for the lightshow's token (its **Settings → Server & access**; the input is
+asks for the engine's token (its **Settings → Server & access**; the input is
 hidden). Then the dashboard, <http://127.0.0.1:9090/>, shows the **Party visuals**
-panel and its link to the lightshow.
+panel and its link to the engine.
 
 What the script does:
 
@@ -109,7 +109,7 @@ What the script does:
    the checkout's `.npmrc`.
 3. Clones this bundle into its `bundles\party-visuals` and runs `npm ci --omit=dev`.
 4. Writes `cfg\nodecg.json` (NodeCG on 127.0.0.1:9090) and `cfg\party-visuals.json`
-   (the lightshow's address and the token file; a new one also gets `graphics.offsetMs`
+   (the engine's address and the token file; a new one also gets `graphics.offsetMs`
    at 0 for the beamer), keeping any other setting already in them, a tuned `offsetMs`
    included.
 5. Writes the token to `cfg\party-visuals.token`, readable by this Windows user only
@@ -134,7 +134,7 @@ powershell -ExecutionPolicy Bypass -Command "Get-Help .\Install-PartyVisuals.ps1
 
 For the native Music Assistant visualizer, install Chrome and copy
 [`tools/browser-visuals`](https://github.com/tyclab/artnet-lightshow/tree/main/tools/browser-visuals)
-from the matching ArtNet Lightshow release to
+from the matching TycStation Lightshow release to
 `%LOCALAPPDATA%\PartyVisuals\browser-visuals`, then run `npm.cmd ci --omit=dev`
 in that folder. Copy `Start-PartyVisualsBrowser.ps1` into the local startup folder.
 The default player URL selects SHD; configure `-VisualizerUrl` for another player.
@@ -192,18 +192,18 @@ Assistant's native visualizer. Existing Companion **VISUALS OFF/ON** buttons use
 NodeCG's `wash.on` switch to cover or reveal it; `all/air.off` and `all/air.on`
 already control that switch. Wash/bar intensity remains specific to those optional graphics.
 
-The browser workflow runs without a lightshow output connection by default.
+The browser workflow runs without an engine output connection by default.
 Optional `-Curtain` uses the separately deployed guarded pixel-input feature;
-it never arms the rig. Follow the ArtNet helper documentation before enabling it.
+it never arms the rig. Follow the engine's helper documentation before enabling it.
 Optional `-Room` streams the same picture as one colour per lamp cell, read at
-each cell's place on the lightshow's plan, for the lightshow's **Picture:
+each cell's place on the engine's plan, for the engine's **Picture:
 Visualizer** selector (Perform or Settings → Show); with **Effects** selected the
 show ignores it, so the switch is instant. Add `-Panels "38:20x6,39:20x6"` to stream the complete visualizer image to
 additional grid fixtures, such as the two GLORBs, using their existing WLED maps.
 Each panel keeps an independent lease; all outputs use the same supervised helper
 and browser, and equal grid sizes share captures. Combine these options and
 give them to `-Register` for the "PartyVisuals Browser" task.
-The launcher lets the helper negotiate its default capture rate with the lightshow
+The launcher lets the helper negotiate its default capture rate with the engine
 (`-Fps 0`, the default).
 The dedicated profile disables Chrome's occlusion backgrounding, renderer priority
 reduction and background timer throttling so a visible visualizer continues
@@ -212,7 +212,7 @@ profile. After updating these launch flags, close that browser window once befor
 restarting the task; the launcher refuses to adopt a window with the old flags.
 The profile, login and saved window placement stay in place.
 
-With the matching Tyclab Lightshow helper this targets 44 fps.
+With the matching TycStation Lightshow helper this targets 44 fps.
 Optional `-Fps 60` requests up to 60 captures per second from a
 matching helper/server release. Actual refresh depends on capture and delivery
 time, and lighting output currently runs at 44 Hz. Frames stay current instead
@@ -230,10 +230,10 @@ The browser's own Music Assistant audio path determines visualizer timing;
 `graphics.offsetMs` applies only to this bundle's wash/bar graphics.
 
 NodeCG listens on 127.0.0.1 only, so the browser helper and Companion run on the show PC too. The show
-PC reaches the lightshow at its port 3000, which the lightshow's host has to admit from
-the show PC's address; that is set up on the lightshow's host, not by this script. The
-address's host name has to be one the lightshow answers to (its machine name, an IP
-address, or its **Public URL**), or the lightshow answers 403 and the panel says so
+PC reaches the engine at its port 3000, which the engine's host has to admit from
+the show PC's address; that is set up on the engine's host, not by this script. The
+address's host name has to be one the engine answers to (its machine name, an IP
+address, or its **Public URL**), or the engine answers 403 and the panel says so
 ([The network](#the-network)).
 
 ### Keeping NodeCG running
@@ -306,7 +306,7 @@ describes it):
 }
 ```
 
-and `cfg/party-visuals.token` holding the lightshow's access token (its
+and `cfg/party-visuals.token` holding the engine's access token (its
 **Settings → Server & access**) and nothing else.
 
 **The token goes in a file, never in `cfg/party-visuals.json`**: NodeCG hands the bundle's
@@ -318,8 +318,8 @@ nothing is sent).
 
 | Option | |
 |---|---|
-| `lightshow.url` | The lightshow server, `http(s)://host:port` (default `http://127.0.0.1:3000`). |
-| `lightshow.tokenFile` | The token file; a relative path starts at the folder NodeCG runs from. Empty: a lightshow with no token (bound to loopback). |
+| `lightshow.url` | The engine's address, `http(s)://host:port` (default `http://127.0.0.1:3000`). |
+| `lightshow.tokenFile` | The token file; a relative path starts at the folder NodeCG runs from. Empty: an engine with no token (bound to loopback). |
 | `lightshow.pollMs` | How often `GET /api/state` is polled while the socket is down (default 1000). |
 | `lightshow.reconnect.minMs` · `maxMs` | The wait before reconnecting: doubling from 500 ms up to 15 s, a little shorter at random. |
 | `graphics.maxFps` | The most frames a second a graphic draws (default 30). |
@@ -328,12 +328,12 @@ nothing is sent).
 
 ### The network
 
-On the show PC, NodeCG reaches the lightshow over the network (`tychome:3000` in the
-example above). The lightshow host keeps port 3000 to loopback and its single-sign-on
+On the show PC, NodeCG reaches the engine over the network (`tychome:3000` in the
+example above). The engine's host keeps port 3000 to loopback and its single-sign-on
 front door, so this connection needs a route: either the port opened to the show PC's
-address, or a path through the front door that accepts the lightshow token on its own
+address, or a path through the front door that accepts the engine's token on its own
 (an extension cannot answer a browser login). Which one is a deployment decision, made and
-recorded with the deployment, not in this repository. The lightshow also refuses host
+recorded with the deployment, not in this repository. The engine also refuses host
 names it does not know: reaching it by a name other than its machine name needs that name
 as its **Public URL** (Settings → Server & access).
 
@@ -379,11 +379,11 @@ Written by the extension; graphics and panels read them.
 
 | Replicant | |
 |---|---|
-| `bpm` | The lightshow's tempo (its clock's, else the typed one); null before it has sent one. |
-| `beatPos` | `{beat, bpm, at, epoch, locked}`: the beat position at time `at` (ms since 1970), re-published twice a second while connected; graphics extrapolate from it. `locked` says whether the phase came from the lightshow or is the extension's own. |
-| `clockSource` | What the lightshow's clock follows: `auto`, `cdj`, `track`, `live` or `tap`. |
-| `palette` | The base look's screen colours as `#RRGGBB`, white, amber and UV mixed in as the lightshow's own swatches show them; selected gradients use the stop-colour approximation below. Kept across restarts. |
-| `paletteOverride` | The lightshow's palette override as `#RRGGBB`, or null (also when the lightshow does not send one). |
+| `bpm` | The engine's tempo (its clock's, else the typed one); null before it has sent one. |
+| `beatPos` | `{beat, bpm, at, epoch, locked}`: the beat position at time `at` (ms since 1970), re-published twice a second while connected; graphics extrapolate from it. `locked` says whether the phase came from the engine or is the extension's own. |
+| `clockSource` | What the engine's clock follows: `auto`, `cdj`, `track`, `live` or `tap`. |
+| `palette` | The base look's screen colours as `#RRGGBB`, white, amber and UV mixed in as the engine's own swatches show them; selected gradients use the stop-colour approximation below. Kept across restarts. |
+| `paletteOverride` | The engine's palette override as `#RRGGBB`, or null (also when the engine does not send one). |
 | `audioMode` | `off`, `tempo`, `reactive`, or null for older servers. |
 | `audio` | Latest bounded shared audio frame with local receive timestamp, event identity, energy and bands; null while disconnected. Graphics discard it after 600 ms. |
 | `connection` | `{status, via, since, lastUpdate, error, retryInMs, target}`; `status` is `connecting`, `connected`, `reconnecting`, `error` or `stopped` (NodeCG shutting down), `via` is `socket` or `http`. Never the token. |
@@ -391,7 +391,7 @@ Written by the extension; graphics and panels read them.
 
 Each has its JSON schema in `schemas/`.
 
-## How it follows the lightshow
+## How it follows the engine
 
 ```mermaid
 flowchart LR
@@ -408,7 +408,7 @@ flowchart LR
   Helper -.->|30-second bounded summaries| Logs[Existing Alloy / Loki]
   Replicants -->|Visual on/off| Helper
   Helper -->|Display visibility| Browser
-  Lightshow[ArtNet Lightshow] -->|Socket.IO snapshot / patch| Mirror[Extension state mirror]
+  Lightshow[TycStation Lightshow engine] -->|Socket.IO snapshot / patch| Mirror[Extension state mirror]
   Lightshow -->|HTTP poll while socket is down| Mirror
   Lightshow -->|Read-only audio subscription| Audio[Shared hit identity and energy]
   Audio --> Replicants
@@ -422,11 +422,11 @@ flowchart LR
   Controls[Dashboard / Companion] -->|Bundle commands| Replicants
 ```
 
-The extension is a read-only client of the lightshow server. It connects over Socket.IO
+The extension is a read-only client of the engine. It connects over Socket.IO
 asking for protocol 2 (`auth: {token, protocol: 2}`), takes the snapshot, then applies
 the patches, each domain's version in order; a missed patch makes it ask for the whole
 state again (`sync`). It reads `bpm`, `clock` (`source`, `bpm`, and `beatPos` and `epoch`
-when the lightshow sends them), `basePalette` and `overridePalette`. Older servers use
+when the engine sends them), `basePalette` and `overridePalette`. Older servers use
 the four colour slots through the colour-preset catalogue and `paletteOverride`.
 The three palette fields belong to the `look` domain; catalogue/library changes alone
 do not refresh the beat. Palette-only and typed-bpm-only patches never reuse an old
@@ -439,7 +439,7 @@ The existing `graphics.offsetMs` compensates predictable beat phase; shared audi
 hits arrive live and cannot be advanced before they are observed. Judge actual
 screen/lamp alignment on the target display during commissioning.
 
-Palette compatibility is checked against ArtNet Lightshow
+Palette compatibility is checked against TycStation Lightshow
 [`2b539dc`](https://github.com/tyclab/artnet-lightshow/commit/2b539dc546757cb7f740817321eb7a56e0e88f44).
 Hex colours accept `#RGB`, `#RRGGBB`, `#RRGGBBWW`, `#RRGGBBWWAA` and
 `#RRGGBBWWAAUU`; the trailing bytes are emitters, never transparency. White adds to
@@ -463,11 +463,11 @@ Without a usable gradient, the palette's colours are used directly.
 While the socket is down it polls `GET /api/state` (the token in the `X-Lightshow-Token`
 header), so the tempo and colours get through a proxy that will not carry the socket.
 Reconnecting is its own, with the backoff above, and goes on after a refused token, so a
-token fixed on the lightshow's side is picked up without restarting NodeCG. A refused
-poll (401: the token; 403: a host name the lightshow does not answer to) is not repeated
+token fixed on the engine's side is picked up without restarting NodeCG. A refused
+poll (401: the token; 403: a host name the engine does not answer to) is not repeated
 every second: the next socket attempt polls once more if it fails.
 
-A lightshow that sends no beat position (the clock's `{source, bpm}` alone) still drives
+An engine that sends no beat position (the clock's `{source, bpm}` alone) still drives
 the graphics at its tempo; the phase is then the extension's own, shared by every graphic.
 
 ## Development
@@ -479,7 +479,7 @@ npm install
 npm test
 ```
 
-The tests run against a local mock of the lightshow's Socket.IO server; nothing leaves the
+The tests run against a local mock of the engine's Socket.IO server; nothing leaves the
 machine. `shared/` is loaded both by the extension and, as plain scripts, by the graphics.
 
 On Windows, `powershell -NoProfile -ExecutionPolicy Bypass -File test\install.test.ps1`

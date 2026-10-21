@@ -203,7 +203,7 @@ function Start-VisualsBrowser {
     foreach ($path in @($ChromeExe, $NodeExe, $HelperPath)) {
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required executable or helper is missing: $path" }
     }
-    if (($Curtain -or $Room -or $Panels) -and -not (Test-Path -LiteralPath $NodecgConfig -PathType Leaf)) { throw 'The lightshow output configuration is missing.' }
+    if (($Curtain -or $Room -or $Panels) -and -not (Test-Path -LiteralPath $NodecgConfig -PathType Leaf)) { throw 'The engine output configuration is missing.' }
     $profile = [IO.Path]::GetFullPath($BrowserProfile).TrimEnd('\')
     $normalProfile = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'Google\Chrome\User Data')).TrimEnd('\')
     if ($profile -ieq $normalProfile -or $profile.StartsWith($normalProfile + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'A separate PartyVisuals browser profile is required; the normal Chrome profile is not supported.' }

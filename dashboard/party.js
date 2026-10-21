@@ -1,5 +1,5 @@
 /**
- * The dashboard panel: the link to the lightshow, its tempo and palette, and
+ * The dashboard panel: the link to the engine, its tempo and palette, and
  * each graphic's switch and intensity. Switches go to the extension as `cmd`
  * messages, the same commands Companion sends, and come back through the
  * `controls` Replicant, so every open dashboard and every graphic agree.
@@ -45,7 +45,7 @@
     const audioAge = audio ? Date.now() - audio.at : Infinity;
     $('audioResponse').textContent = c.status === 'connected' && reps.audioMode.value === 'reactive' && audioAge >= 0 && audioAge < 600
       ? 'Shared audio: following the lights’ hits and energy'
-      : 'Tempo and colours only · enable Reactive audio in ArtNet for shared music response';
+      : 'Tempo and colours only · enable Reactive audio in the engine for shared music response';
   }
 
   function showTempo() {
@@ -55,7 +55,7 @@
     $('source').textContent = src ? (SOURCES[src] || src) : '';
     const beat = reps.beatPos.value;
     $('phase').textContent = beat && beat.at > 0
-      ? (beat.locked ? 'Beat position from the lightshow' : 'Free-running at the lightshow\'s tempo (it sends no beat position)')
+      ? (beat.locked ? 'Beat position from the engine' : 'Free-running at the engine\'s tempo (it sends no beat position)')
       : '';
   }
 
@@ -73,9 +73,9 @@
     const { colours, source } = PV.effectivePalette({ override: reps.paletteOverride.value, palette: reps.palette.value });
     swatches($('swatches'), colours);
     $('paletteSource').textContent = {
-      override: 'The lightshow\'s palette override',
-      look: 'The lightshow\'s look',
-      default: 'Default colours (nothing from the lightshow yet)',
+      override: 'The engine\'s palette override',
+      look: 'The engine\'s look',
+      default: 'Default colours (nothing from the engine yet)',
     }[source];
     const look = PV.paletteFrom(reps.palette.value);
     $('lookSwatches').hidden = !(source === 'override' && look);
@@ -84,6 +84,11 @@
 
   // A slider being dragged is not moved by the Replicant under the pointer.
   const dragging = new Set();
+
+  // The track's filled portion, read by brand.css.
+  function fill(range) {
+    range.style.setProperty('--fill', `${range.value}%`);
+  }
 
   function showControls() {
     const controls = reps.controls.value;
@@ -97,6 +102,7 @@
       button.setAttribute('aria-pressed', String(g.on));
       const range = section.querySelector('input');
       if (!dragging.has(target)) range.value = g.intensity;
+      fill(range);
       section.querySelector('output').textContent = `${g.intensity} %`;
     }
   }
@@ -118,6 +124,7 @@
     range.addEventListener('pointerup', () => dragging.delete(target));
     // At most ten sends a second while dragging; the last value always goes.
     range.addEventListener('input', () => {
+      fill(range);
       if (pending) return;
       pending = setTimeout(() => {
         pending = null;

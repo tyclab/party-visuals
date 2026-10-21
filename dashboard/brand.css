@@ -1,0 +1,195 @@
+/* TycStation brand layer ("Ambient Rack"): tokens and shared recipes. Loaded before party.css. */
+:root {
+  color-scheme: dark;
+  --ground: #07070e;
+  --panel: rgba(20, 22, 36, 0.72);
+  --panel-solid: #151724;
+  --edge: rgba(150, 165, 205, 0.55);
+  --edge-strong: rgba(160, 175, 215, 0.75);
+  --blue: #5aa2ff;
+  --violet: #8b6cf0;
+  --red: #ff4a3d;
+  --led-amber: #ffb340;
+  --ink: #eceef6;
+  --dim: #9aa2b8;
+  --faint: #939bb0;
+  --poles: linear-gradient(90deg, var(--red), var(--violet) 45%, var(--blue));
+  --glow-blue: 0 0 0.75rem rgba(90, 162, 255, 0.9);
+  --glow-amber: 0 0 0.5rem rgba(255, 179, 64, 0.8);
+  --glow-red: 0 0 0.5rem rgba(255, 74, 61, 0.8);
+  --wash-blue: rgba(90, 162, 255, 0.08);
+  --wash-red: rgba(255, 74, 61, 0.08);
+  --radius: 0.875rem;
+  --hairline: 0.0625rem;
+  --font-body: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
+}
+
+body {
+  background:
+    radial-gradient(44rem 26rem at 12% -6%, rgba(139, 108, 240, 0.17), transparent 62%),
+    radial-gradient(52rem 29rem at 96% 30%, rgba(90, 162, 255, 0.15), transparent 60%),
+    radial-gradient(33rem 19rem at 70% 105%, rgba(255, 74, 61, 0.07), transparent 65%),
+    var(--ground);
+  background-attachment: fixed;
+  color: var(--ink);
+  font-family: var(--font-body);
+  overflow-wrap: break-word;
+}
+
+:focus-visible {
+  outline: 0.125rem solid var(--blue);
+  outline-offset: 0.1875rem;
+}
+
+a {
+  color: var(--blue);
+  text-underline-offset: 0.15em;
+}
+a:hover {
+  color: var(--violet);
+  text-decoration-thickness: 0.125rem;
+}
+
+.svg-defs {
+  position: absolute;
+  width: 0;
+  height: 0;
+  overflow: hidden;
+}
+
+.site-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 0.75rem;
+  margin-bottom: 1rem;
+  border-bottom: var(--hairline) solid var(--edge);
+}
+.site-wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.6rem;
+  font: 600 1.1rem/1.2 var(--font-mono);
+  color: var(--ink);
+  white-space: nowrap;
+}
+.site-mark {
+  width: 1.7rem;
+  height: 1.7rem;
+  flex: none;
+}
+.cursor {
+  display: inline-block;
+  width: 0.55em;
+  height: 1.1em;
+  margin-left: 0.3em;
+  vertical-align: -0.18em;
+  background: var(--blue);
+  box-shadow: var(--glow-blue);
+}
+.site-kicker {
+  font: 400 0.78rem/1.4 var(--font-mono);
+  letter-spacing: 0.08em;
+  color: var(--faint);
+  text-align: right;
+  white-space: nowrap;
+}
+@media (max-width: 47.5em) {
+  .site-kicker { display: none; }
+}
+
+.panel-kicker {
+  font: 600 0.7rem/1.4 var(--font-mono);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+code {
+  font: 400 0.9em var(--font-mono);
+  padding: 0.05em 0.35em;
+  border-radius: 0.25rem;
+  border: var(--hairline) solid var(--edge);
+  background: var(--panel-solid);
+}
+
+button {
+  font: inherit;
+  font-size: 0.9rem;
+  min-height: 2.75rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  border: var(--hairline) solid var(--edge-strong);
+  background: var(--panel-solid);
+  color: var(--ink);
+  cursor: pointer;
+}
+button:hover {
+  border-color: var(--blue);
+}
+button:disabled {
+  color: var(--faint);
+  border-style: dashed;
+  border-color: var(--edge);
+  cursor: default;
+}
+
+/* Range slider: hairline track on the opaque panel, a thumb that lights while held.
+   Chromium has no progress pseudo-element: the script sets --fill to the value. */
+input[type="range"] {
+  --fill: 0%;
+  appearance: none;
+  -webkit-appearance: none;
+  height: 2.75rem;
+  margin: 0;
+  background: transparent;
+  cursor: pointer;
+}
+input[type="range"]::-webkit-slider-runnable-track {
+  box-sizing: border-box;
+  height: 0.5rem;
+  border-radius: 0.5rem;
+  border: var(--hairline) solid var(--edge-strong);
+  background-color: var(--panel-solid);
+  background-image: linear-gradient(90deg, var(--blue) var(--fill), transparent 0);
+  background-clip: padding-box;
+}
+input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  width: 1.1rem;
+  height: 1.1rem;
+  margin-top: -0.3rem;
+  border: 0;
+  border-radius: 50%;
+  background: var(--edge-strong);
+}
+input[type="range"]:active::-webkit-slider-thumb {
+  background: var(--blue);
+  box-shadow: var(--glow-blue);
+}
+input[type="range"]::-moz-range-track {
+  box-sizing: border-box;
+  height: 0.5rem;
+  border-radius: 0.5rem;
+  border: var(--hairline) solid var(--edge-strong);
+  background: var(--panel-solid);
+}
+input[type="range"]::-moz-range-progress {
+  height: 0.5rem;
+  border-radius: 0.5rem;
+  background: var(--blue);
+}
+input[type="range"]::-moz-range-thumb {
+  width: 1.1rem;
+  height: 1.1rem;
+  border: 0;
+  border-radius: 50%;
+  background: var(--edge-strong);
+}
+input[type="range"]:active::-moz-range-thumb {
+  background: var(--blue);
+  box-shadow: var(--glow-blue);
+}
