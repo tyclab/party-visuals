@@ -85,6 +85,11 @@
   // A slider being dragged is not moved by the Replicant under the pointer.
   const dragging = new Set();
 
+  // The track's filled portion, read by brand.css.
+  function fill(range) {
+    range.style.setProperty('--fill', `${range.value}%`);
+  }
+
   function showControls() {
     const controls = reps.controls.value;
     if (!controls) return;
@@ -97,6 +102,7 @@
       button.setAttribute('aria-pressed', String(g.on));
       const range = section.querySelector('input');
       if (!dragging.has(target)) range.value = g.intensity;
+      fill(range);
       section.querySelector('output').textContent = `${g.intensity} %`;
     }
   }
@@ -118,6 +124,7 @@
     range.addEventListener('pointerup', () => dragging.delete(target));
     // At most ten sends a second while dragging; the last value always goes.
     range.addEventListener('input', () => {
+      fill(range);
       if (pending) return;
       pending = setTimeout(() => {
         pending = null;

@@ -51,6 +51,9 @@ h2 {
   background: var(--panel-solid);
   font: 400 0.78rem/1.4 var(--font-mono);
 }
+.tempo .source:empty {
+  display: none;
+}
 
 .swatches {
   display: flex;
