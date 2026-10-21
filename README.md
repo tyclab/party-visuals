@@ -439,7 +439,7 @@ The existing `graphics.offsetMs` compensates predictable beat phase; shared audi
 hits arrive live and cannot be advanced before they are observed. Judge actual
 screen/lamp alignment on the target display during commissioning.
 
-Palette compatibility is checked against ArtNet Lightshow
+Palette compatibility is checked against TycStation Lightshow
 [`2b539dc`](https://github.com/tyclab/artnet-lightshow/commit/2b539dc546757cb7f740817321eb7a56e0e88f44).
 Hex colours accept `#RGB`, `#RRGGBB`, `#RRGGBBWW`, `#RRGGBBWWAA` and
 `#RRGGBBWWAAUU`; the trailing bytes are emitters, never transparency. White adds to

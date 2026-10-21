@@ -15,7 +15,7 @@ another machine cannot reach it.
 
 | Connection | Module | Settings |
 |---|---|---|
-| `lightshow` | **ArtNet Lightshow** (the engine's own Companion module, `companion-module/` in [artnet-lightshow](https://github.com/tyclab/artnet-lightshow)) | Host and port of the engine, its access token |
+| `lightshow` | **TycStation Lightshow** (the engine's own Companion module, `companion-module/` in [artnet-lightshow](https://github.com/tyclab/artnet-lightshow)) | Host and port of the engine, its access token |
 | `visuals` | **Generic HTTP Requests** (`generic-http`, ships with Companion) | Base URL: `http://127.0.0.1:9090/bundles/party-visuals/api/cmd/` |
 
 With that base URL every visuals button is a **GET** action whose URI is
@@ -29,7 +29,7 @@ and do not light up with the state; the **Party visuals** panel in NodeCG's dash
 
 8 × 4, Companion's default page size (a Stream Deck XL). Columns 1–4 are the
 engine, columns 5–8 the visuals. The engine's buttons are its module's presets,
-dragged from Presets → ArtNet Lightshow → **Busk**.
+dragged from Presets → the `lightshow` connection → **Busk**.
 
 | | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
 |---|---|---|---|---|---|---|---|---|
@@ -40,7 +40,7 @@ dragged from Presets → ArtNet Lightshow → **Busk**.
 
 ### Lights (columns 1–4)
 
-Presets of the ArtNet Lightshow module, from its **Busk** category:
+Presets of the TycStation Lightshow module, from its **Busk** category:
 
 | Button | Preset (Busk group) | What it does |
 |---|---|---|
@@ -77,8 +77,8 @@ A button can carry actions of both connections:
 
 | Button | Actions |
 |---|---|
-| All dark | ArtNet Lightshow: Master Blackout, on · `visuals`: GET `all/air.off` |
-| All back | ArtNet Lightshow: Master Blackout, off · `visuals`: GET `all/air.on` |
+| All dark | `lightshow`: Master Blackout, on · `visuals`: GET `all/air.off` |
+| All back | `lightshow`: Master Blackout, off · `visuals`: GET `all/air.on` |
 
 ## The commands
 
