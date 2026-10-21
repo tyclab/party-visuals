@@ -1,7 +1,7 @@
 # Companion page: lights and visuals
 
-One Bitfocus Companion page with the lightshow's buttons on the left and the party
-visuals' on the right, for one Stream Deck that runs both.
+One Bitfocus Companion page with the TycStation Lightshow engine's buttons on the left
+and the party visuals' on the right, for one Stream Deck that runs both.
 
 There is no import file. Companion's page export (`.companionconfig`) is an internal
 format with no published specification: it carries a format version that changes
@@ -15,7 +15,7 @@ another machine cannot reach it.
 
 | Connection | Module | Settings |
 |---|---|---|
-| `lightshow` | **ArtNet Lightshow** (the lightshow's own module, `companion-module/` in [artnet-lightshow](https://github.com/tyclab/artnet-lightshow)) | Host and port of the lightshow, its access token |
+| `lightshow` | **ArtNet Lightshow** (the engine's own Companion module, `companion-module/` in [artnet-lightshow](https://github.com/tyclab/artnet-lightshow)) | Host and port of the engine, its access token |
 | `visuals` | **Generic HTTP Requests** (`generic-http`, ships with Companion) | Base URL: `http://127.0.0.1:9090/bundles/party-visuals/api/cmd/` |
 
 With that base URL every visuals button is a **GET** action whose URI is
@@ -28,7 +28,7 @@ and do not light up with the state; the **Party visuals** panel in NodeCG's dash
 ## Page
 
 8 × 4, Companion's default page size (a Stream Deck XL). Columns 1–4 are the
-lightshow, columns 5–8 the visuals. The lightshow's buttons are its module's presets,
+engine, columns 5–8 the visuals. The engine's buttons are its module's presets,
 dragged from Presets → ArtNet Lightshow → **Busk**.
 
 | | 1 | 2 | 3 | 4 | 5 | 6 | 7 | 8 |
@@ -38,7 +38,7 @@ dragged from Presets → ArtNet Lightshow → **Busk**.
 | **3** | Hold: white strobe | Hold: blinder | Hold: UV wash | Hold: kill | Wash on | Wash off | Bar on | Bar off |
 | **4** | Auto show | Master −10 % | Master +10 % | Blackout | Visuals off | Visuals on | All dark | All back |
 
-### Lightshow (columns 1–4)
+### Lights (columns 1–4)
 
 Presets of the ArtNet Lightshow module, from its **Busk** category:
 
@@ -48,7 +48,7 @@ Presets of the ArtNet Lightshow module, from its **Busk** category:
 | BPM (display) | BPM Display (Tempo) | The tempo. |
 | BPM −5 · +5 | BPM -5 · BPM +5 (Tempo) | Adjust BPM by 5. |
 | Palette ×4 | one palette each (Palettes) | The look's palette; lit while it is the look's. |
-| Hold: … | the Hold presets for white strobe, blinder, UV wash and kill (Hold, on while pressed) | Energy Hold: on at the button's down, off at its up. The lightshow lets go a second after it last heard from Companion. |
+| Hold: … | the Hold presets for white strobe, blinder, UV wash and kill (Hold, on while pressed) | Energy Hold: on at the button's down, off at its up. The engine lets go a second after it last heard from Companion. |
 | Auto show | Auto Show (Auto show) | Start or stop the auto show. |
 | Master −10 % · +10 % | Master −10% · Master +10% (Master) | Adjust Master Dimmer. |
 | Blackout | Master Blackout (Master) | Master Blackout, toggle. |
