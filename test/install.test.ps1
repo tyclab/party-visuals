@@ -78,6 +78,16 @@ try {
     Check 'a share root is refused as -Root' (Test-Throws { Resolve-InstallRoot '\\server\share\' })
     Check 'a folder is taken without its trailing separator' ((Resolve-InstallRoot "$work\x\") -eq "$work\x")
 
+    $lockDir = Join-Path $work 'stamp'
+    New-Item -ItemType Directory -Path $lockDir | Out-Null
+    [System.IO.File]::WriteAllText((Join-Path $lockDir 'package-lock.json'), "{}`n")
+    function Invoke-StampWhatIf {
+        [CmdletBinding(SupportsShouldProcess = $true)] param([string] $Dir, [string] $Node)
+        Get-PackagesStamp $Dir $Node
+    }
+    $stamp = try { Invoke-StampWhatIf $lockDir (Get-Command node).Source -WhatIf } catch { "error: $_" }
+    Check 'the packages stamp is computed under -WhatIf' ($stamp -match '^lock=[0-9a-f]{64} node-modules=\d+$') "$stamp"
+
     $taskOf = {
         param([string] $Dir)
         $action = New-Object PSObject -Property @{ Arguments = "`"$Dir\EclipseGraphics\start.js`""; WorkingDirectory = "$Dir\EclipseGraphics" }

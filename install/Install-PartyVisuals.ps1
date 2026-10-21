@@ -416,7 +416,10 @@ function Get-PackagesStamp([string] $Dir, [string] $Node) {
     # native module version. $null when that cannot be known yet.
     $lock = Join-Path $Dir 'package-lock.json'
     if (-not (Test-Path -LiteralPath $lock) -or -not $Node) { return $null }
-    $hash = (Get-FileHash -LiteralPath $lock -Algorithm SHA256).Hash.ToLowerInvariant()
+    # Hashed in .NET: Get-FileHash returns nothing under -WhatIf and the dry run would stop here.
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try { $bytes = $sha.ComputeHash([System.IO.File]::ReadAllBytes($lock)) } finally { $sha.Dispose() }
+    $hash = ([System.BitConverter]::ToString($bytes) -replace '-', '').ToLowerInvariant()
     $abi = (Invoke-Native $Node @('-p', 'process.versions.modules') -Capture).Text
     return "lock=$hash node-modules=$abi"
 }
