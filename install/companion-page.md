@@ -15,7 +15,7 @@ another machine cannot reach it.
 
 | Connection | Module | Settings |
 |---|---|---|
-| `lightshow` | **TycStation Lightshow** (the engine's own Companion module, `companion-module/` in [artnet-lightshow](https://github.com/tyclab/artnet-lightshow)) | Host and port of the engine, its access token |
+| `lightshow` | **TycStation Lightshow** (the engine's own Companion module, `companion-module/` in [lightshow](https://github.com/tyclab/lightshow)) | Host and port of the engine, its access token |
 | `visuals` | **Generic HTTP Requests** (`generic-http`, ships with Companion) | Base URL: `http://127.0.0.1:9090/bundles/party-visuals/api/cmd/` |
 
 With that base URL every visuals button is a **GET** action whose URI is
