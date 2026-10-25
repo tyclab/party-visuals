@@ -1,7 +1,7 @@
 # TycStation Lightshow — party visuals
 
 Local party display controls and browser graphics that keep time with the TycStation
-Lightshow engine ([artnet-lightshow](https://github.com/tyclab/artnet-lightshow)). A
+Lightshow engine ([lightshow](https://github.com/tyclab/lightshow)). A
 [NodeCG](https://www.nodecg.dev) 2 bundle that runs in the same NodeCG as
 [EclipseGraphics](https://github.com/LightD31/EclipseGraphics): EclipseGraphics draws the
 cards, lower thirds and tickers, this bundle draws what moves with the music behind and
@@ -133,7 +133,7 @@ powershell -ExecutionPolicy Bypass -Command "Get-Help .\Install-PartyVisuals.ps1
 ```
 
 For the native Music Assistant visualizer, install Chrome and copy
-[`tools/browser-visuals`](https://github.com/tyclab/artnet-lightshow/tree/main/tools/browser-visuals)
+[`tools/browser-visuals`](https://github.com/tyclab/lightshow/tree/main/tools/browser-visuals)
 from the matching TycStation Lightshow release to
 `%LOCALAPPDATA%\PartyVisuals\browser-visuals`, then run `npm.cmd ci --omit=dev`
 in that folder. Copy `Start-PartyVisualsBrowser.ps1` into the local startup folder.
@@ -440,7 +440,7 @@ hits arrive live and cannot be advanced before they are observed. Judge actual
 screen/lamp alignment on the target display during commissioning.
 
 Palette compatibility is checked against TycStation Lightshow
-[`2b539dc`](https://github.com/tyclab/artnet-lightshow/commit/2b539dc546757cb7f740817321eb7a56e0e88f44).
+[`2b539dc`](https://github.com/tyclab/lightshow/commit/2b539dc546757cb7f740817321eb7a56e0e88f44).
 Hex colours accept `#RGB`, `#RRGGBB`, `#RRGGBBWW`, `#RRGGBBWWAA` and
 `#RRGGBBWWAAUU`; the trailing bytes are emitters, never transparency. White adds to
 all three screen channels, amber adds red and half as much green, and UV appears as
