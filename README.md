@@ -119,7 +119,9 @@ What the script does:
    **PartyVisuals NodeCG** ([Keeping NodeCG running](#keeping-nodecg-running)).
 
 It can be run again: what is in place is kept, and the packages are installed again
-only when a lockfile or the Node.js major version changed. `-NewToken` asks for the token again,
+only when a lockfile or the Node.js major version changed. After an update run, stop and start
+**PartyVisuals NodeCG** so NodeCG loads the new bundle. `-NewToken` asks for the token again
+(after the engine's token changed; Companion's `lightshow` connection needs it too),
 `-LightshowUrl` changes the address, `-EclipseGraphicsCommit` and `-BundleRef` (a commit,
 or a `vX.Y.Z` tag) move the pins, and `-Uninstall` removes the task and the folder, only
 a folder the script set up (its marker file in it) and not one reached through a link.
@@ -139,6 +141,12 @@ from the matching TycStation Lightshow release to
 in that folder. Copy `Start-PartyVisualsBrowser.ps1` into the local startup folder.
 The default player URL selects SHD; configure `-VisualizerUrl` for another player.
 Sign in to Music Assistant once in the dedicated browser profile.
+
+Only playback from a Music Assistant queue animates the visualizer: Music Assistant
+2.10.7 feeds it from queue buffers, so Spotify Connect through Music Assistant, and
+audio that reaches the speaker past it, leave the screen black. Following everything
+the speaker plays is an open requirement, not a design choice. Chrome marks a covered
+window hidden and the visualizer stops painting, so captures need the window in front.
 
 As the user who runs the show, register the **PartyVisuals Browser** task from the
 copied launcher, with the output switches the task should use, and start it:
@@ -190,7 +198,8 @@ player page.
 The helper hides the album artwork, timeline and tint while retaining Music
 Assistant's native visualizer. Existing Companion **VISUALS OFF/ON** buttons use
 NodeCG's `wash.on` switch to cover or reveal it; `all/air.off` and `all/air.on`
-already control that switch. Wash/bar intensity remains specific to those optional graphics.
+already control that switch. While NodeCG is unreachable the helper keeps the
+visualizer covered, so a black screen with music playing points at NodeCG first. Wash/bar intensity remains specific to those optional graphics.
 
 The browser workflow runs without an engine output connection by default.
 Optional `-Curtain` uses the separately deployed guarded pixel-input feature;
