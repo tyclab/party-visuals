@@ -142,11 +142,8 @@ in that folder. Copy `Start-PartyVisualsBrowser.ps1` into the local startup fold
 The default player URL selects SHD; configure `-VisualizerUrl` for another player.
 Sign in to Music Assistant once in the dedicated browser profile.
 
-Only playback from a Music Assistant queue animates the visualizer: Music Assistant
-2.10.7 feeds it from queue buffers, so Spotify Connect through Music Assistant, and
-audio that reaches the speaker past it, leave the screen black. Following everything
-the speaker plays is an open requirement, not a design choice. Chrome marks a covered
-window hidden and the visualizer stops painting, so captures need the window in front.
+For playback-path limits and black-screen diagnosis, see
+[runtime troubleshooting](docs/agents/runtime.md).
 
 As the user who runs the show, register the **PartyVisuals Browser** task from the
 copied launcher, with the output switches the task should use, and start it:
@@ -198,8 +195,8 @@ player page.
 The helper hides the album artwork, timeline and tint while retaining Music
 Assistant's native visualizer. Existing Companion **VISUALS OFF/ON** buttons use
 NodeCG's `wash.on` switch to cover or reveal it; `all/air.off` and `all/air.on`
-already control that switch. While NodeCG is unreachable the helper keeps the
-visualizer covered, so a black screen with music playing points at NodeCG first. Wash/bar intensity remains specific to those optional graphics.
+already control that switch. The helper keeps the visualizer covered while NodeCG
+is unreachable. Wash/bar intensity remains specific to those optional graphics.
 
 The browser workflow runs without an engine output connection by default.
 Optional `-Curtain` uses the separately deployed guarded pixel-input feature;
