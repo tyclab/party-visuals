@@ -73,10 +73,14 @@ func (m *Manager) notify(s Status) {
 }
 
 func (m *Manager) Apply(command string) error {
-	return m.apply(command, "")
+	return m.apply(command, "", 0)
 }
-func (m *Manager) apply(command, reason string) error {
+func (m *Manager) apply(command, reason string, expectedGeneration uint64) error {
 	m.mu.Lock()
+	if expectedGeneration != 0 && m.state.Generation != expectedGeneration {
+		m.mu.Unlock()
+		return nil
+	}
 	if m.closed {
 		m.mu.Unlock()
 		return errors.New("controller is shutting down")
@@ -226,14 +230,11 @@ func (m *Manager) reconcile(ctx context.Context, gen uint64, want bool) {
 		case <-ctx.Done():
 			return
 		case err := <-session.Done():
-			if !m.current(gen) {
-				return
-			}
 			reason := "Visualizer window closed; Start to resume"
 			if err != nil {
 				reason = "Visuals stopped unexpectedly; inspect diagnostics, then Start: " + err.Error()
 			}
-			_ = m.apply("stop", reason)
+			_ = m.apply("stop", reason, gen)
 		}
 	}()
 }

@@ -228,3 +228,37 @@ func TestStopStillEndsSessionWhenPersistenceFails(t *testing.T) {
 		t.Fatal("runtime Off lost")
 	}
 }
+
+func TestStaleSessionCompletionCannotStopNewStart(t *testing.T) {
+	b := &fakeBackend{}
+	m, store := newManager(t, b)
+	m.Apply("start")
+	eventually(t, func() bool { return m.Snapshot().Phase == "running" })
+	oldGeneration := m.Snapshot().Generation
+	if !m.current(oldGeneration) {
+		t.Fatal("old completion must initially observe itself current")
+	}
+	m.Apply("stop")
+	m.Apply("start")
+	eventually(t, func() bool { return m.Snapshot().Phase == "running" && m.Snapshot().Generation != oldGeneration })
+	before := m.Snapshot()
+	if e := m.apply("stop", "late old completion", oldGeneration); e != nil {
+		t.Fatal(e)
+	}
+	after := m.Snapshot()
+	persisted, e := store.Load()
+	if e != nil {
+		t.Fatal(e)
+	}
+	if after != before || persisted.ManualOff || !persisted.Requested {
+		t.Fatalf("stale completion changed newer intent: before=%+v after=%+v persisted=%+v", before, after, persisted)
+	}
+	b.mu.Lock()
+	current := b.sessions[len(b.sessions)-1]
+	b.mu.Unlock()
+	select {
+	case <-current.stopped:
+		t.Fatal("stale completion stopped newer worker")
+	default:
+	}
+}
