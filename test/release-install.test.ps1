@@ -30,6 +30,17 @@ try {
     $message = ''
     try { Get-VerifiedRelease $target | Out-Null } catch { $message = $_.Exception.Message }
     Check 'an asset without a published checksum is refused' ($message -like '*no checksum for Start-PartyVisualsNodecg.ps1*')
+    Write-Sums ($Assets + 'party-visuals.exe')
+    $message = ''
+    try { Get-VerifiedRelease $target | Out-Null } catch { $message = $_.Exception.Message }
+    Check 'two checksum lines for one asset are refused' ($message -like '*more than one line for party-visuals.exe*' -and -not (Test-Path -LiteralPath $target))
+    $refused = 0
+    foreach ($final in @([pscustomobject]@{ ResponseUri = [Uri]'http://objects.example/asset' }, [pscustomobject]@{ ResponseUri = $null })) {
+        try { Assert-HttpsResponse ([pscustomobject]@{ BaseResponse = $final }) 'asset' } catch { $refused++ }
+    }
+    Assert-HttpsResponse ([pscustomobject]@{ BaseResponse = [pscustomobject]@{ ResponseUri = [Uri]'https://objects.example/asset' } }) 'asset'
+    Assert-HttpsResponse ([pscustomobject]@{ BaseResponse = [pscustomobject]@{ RequestMessage = [pscustomobject]@{ RequestUri = [Uri]'https://objects.example/asset' } } }) 'asset'
+    Check 'only downloads that end on https are accepted' ($refused -eq 2)
     Write-Sums $Assets
     $ExpectedSha256 = 'a' * 64
     $message = ''

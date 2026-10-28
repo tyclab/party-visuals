@@ -31,13 +31,21 @@ $Usage = 'Usage: Install-PartyVisualsRelease.ps1 -Tag vX.Y.Z [-MusicAssistantUrl
 $WindowsPowerShell = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
 
 function Save-ReleaseAsset([string] $Name, [string] $Path) {
-    Invoke-WebRequest -UseBasicParsing -Uri "$ReleaseBase/$Tag/$Name" -OutFile $Path
+    $response = Invoke-WebRequest -UseBasicParsing -Uri "$ReleaseBase/$Tag/$Name" -OutFile $Path -PassThru
+    Assert-HttpsResponse $response $Name
+}
+function Assert-HttpsResponse($Response, [string] $Name) {
+    $base = $Response.BaseResponse
+    $final = if ($base.PSObject.Properties['ResponseUri']) { $base.ResponseUri } else { $base.RequestMessage.RequestUri }
+    if ($null -eq $final -or $final.Scheme -ne 'https') { throw "$Name of release $Tag did not arrive over https; refusing it." }
 }
 function Read-ReleaseSums([string] $Path) {
+    if ((Get-Item -LiteralPath $Path).Length -gt 1MB) { throw "SHA256SUMS of release $Tag is larger than 1 MiB." }
     $sums = @{}
     foreach ($line in [IO.File]::ReadAllLines($Path)) {
         if (-not $line.Trim()) { continue }
         if ($line -notmatch '^([0-9a-fA-F]{64}) [ *](\S+)$') { throw "SHA256SUMS of release $Tag has an unreadable line." }
+        if ($sums.ContainsKey($Matches[2])) { throw "SHA256SUMS of release $Tag has more than one line for $($Matches[2])." }
         $sums[$Matches[2]] = $Matches[1].ToLowerInvariant()
     }
     return $sums
