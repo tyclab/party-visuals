@@ -215,6 +215,11 @@ try {
     $f = Read-Text $fresh | ConvertFrom-Json
     Check 'party-visuals.json, new: the token file and offsetMs 0' ($f.lightshow.tokenFile -eq 'cfg/party-visuals.token' -and $f.graphics.offsetMs -eq 0)
 
+    $controllerRoot = Join-Path $work 'controller-owned'
+    New-Item -ItemType Directory -Path (Join-Path $controllerRoot 'controller') -Force | Out-Null
+    [IO.File]::WriteAllText((Join-Path $controllerRoot 'controller\migration.json'), '{"version":1,"phase":"active"}')
+    Check 'legacy autostart refuses a controller-owned installation' (Test-Throws { Register-Autostart -Node 'unused.exe' -InstallRoot $controllerRoot -Confirm:$false })
+
     # ------------------------------------------------------------ the install folder
 
     $plain = Join-Path $work 'plain'

@@ -589,6 +589,11 @@ function Register-Autostart {
     # The launcher writes the task, so -Autostart and the launcher's own -Register give the same one.
     [CmdletBinding(SupportsShouldProcess = $true)]
     param([string] $Node, [string] $InstallRoot)
+    $controllerJournal = Join-Path $InstallRoot 'controller\migration.json'
+    if (Test-Path -LiteralPath $controllerJournal) {
+        $controllerState = Get-Content -LiteralPath $controllerJournal -Raw | ConvertFrom-Json
+        if ($controllerState.phase -ne 'rolled-back-off') { throw 'Party Visuals controller owns autostart. Use its tray or CLI; complete Rollback before registering a legacy supervisor.' }
+    }
     $launcher = [System.IO.Path]::Combine($InstallRoot, 'startup', 'Start-PartyVisualsNodecg.ps1')
     $what = "copy $LauncherSource to $launcher and register: from logon, keep NodeCG running (NodeCG on ${NodecgHost}:$NodecgPort)"
     if (-not $PSCmdlet.ShouldProcess("scheduled task '$TaskName'", $what)) { return }

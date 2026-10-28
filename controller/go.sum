@@ -1,0 +1,4 @@
+github.com/tyclab/tycswap v0.7.28-0.20261028153030-3c25dd8f6147 h1:WAlhlvtSSApVvB94D2kTDTxcIbD4st65FrbQkKpQfYw=
+github.com/tyclab/tycswap v0.7.28-0.20261028153030-3c25dd8f6147/go.mod h1:kP3GWhrb97+Tkd9bRNyNYyMymTasUhXVgulKAUWcabY=
+golang.org/x/sys v0.47.0 h1:o7XGOvZQCADBQQ4Y7VNq2dRWQR7JmOUW8Kxx4ZsNgWs=
+golang.org/x/sys v0.47.0/go.mod h1:4GL1E5IUh+htKOUEOaiffhrAeqysfVGipDYzABqnCmw=

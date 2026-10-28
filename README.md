@@ -1,5 +1,8 @@
 # TycStation Lightshow — party visuals
 
+For Windows visualizer Start/Stop, persistent Manual Off and tray controls,
+see the [controller installation and lifecycle](controller/README.md).
+
 Local party display controls and browser graphics that keep time with the TycStation
 Lightshow engine ([lightshow](https://github.com/tyclab/lightshow)). A
 [NodeCG](https://www.nodecg.dev) 2 bundle that runs in the same NodeCG as
