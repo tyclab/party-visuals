@@ -45,6 +45,45 @@ artwork/text. Its `--status-file` support is required before a session can run.
 
 ## Installation
 
+### On another Windows PC
+
+Pushing a `vX.Y.Z` tag runs the controller checks, then publishes
+`party-visuals.exe`, the PowerShell 5.1 installers and `SHA256SUMS` as a GitHub
+release. As the Windows user who runs the show, in a normal (not elevated)
+PowerShell window:
+
+1. Install Node.js 22 or later, Git and Chrome:
+   `winget install --id OpenJS.NodeJS.LTS --exact`,
+   `winget install --id Git.Git --exact`, `winget install --id Google.Chrome --exact`.
+2. Install NodeCG with this bundle using `Install-PartyVisuals.ps1`
+   ([Install on the show PC](../README.md#install-on-the-show-pc)) without
+   `-Autostart`; the controller starts NodeCG.
+3. Install the capture helper in `%LOCALAPPDATA%\PartyVisuals\browser-visuals`
+   as described in the same section.
+4. Run this line, with the release tag in place of `vX.Y.Z`:
+
+```powershell
+$t = 'vX.Y.Z'; $f = "$env:TEMP\Install-PartyVisualsRelease.ps1"; [Net.ServicePointManager]::SecurityProtocol = 'Tls12'; Invoke-WebRequest -UseBasicParsing "https://github.com/tyclab/party-visuals/releases/download/$t/Install-PartyVisualsRelease.ps1" -OutFile $f; powershell -NoProfile -ExecutionPolicy Bypass -File $f -Tag $t
+```
+
+It downloads the release to `%LOCALAPPDATA%\PartyVisuals\installer\<tag>`, checks
+every file against the release's `SHA256SUMS`, asks for the Music Assistant
+address and player id (the `player=` value of its now-playing page), names any
+missing prerequisite and runs Stage with the verified hash. Add `-Cutover` to
+activate the controller in the same run; visuals still begin Off and nothing is
+armed. `-MusicAssistantUrl`, `-Player`, `-ChromeExe`, `-NodeExe` and
+`-NodecgConfig` replace the prompts and defaults; `-ConfigPath` or
+`-ImportLegacy` go to Stage unchanged. Curtain, room and panel output need a
+reviewed `-ConfigPath`. `SHA256SUMS` comes from the same release, so it catches
+damaged or incomplete downloads; `-ExpectedSha256` also pins the executable to a
+hash reviewed elsewhere, such as the release job log. After the first Start,
+sign in to Music Assistant once in the dedicated browser window.
+
+To update, choose **Stop visuals and quit** in the tray, then run the line again
+with the new tag and `-Cutover`. The active configuration is kept.
+
+### From a checkout
+
 Build from this directory with `go build -trimpath -o party-visuals.exe
 ./cmd/party-visuals`, or use the reviewed Windows CI artifact. In PowerShell 5.1:
 
