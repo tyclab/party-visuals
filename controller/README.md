@@ -50,10 +50,11 @@ artwork/text. Its `--status-file` support is required before a session can run.
 
 ### On another Windows PC
 
-Pushing a `vX.Y.Z` tag runs the controller checks, then publishes
-`party-visuals.exe`, the PowerShell 5.1 installers and `SHA256SUMS` as a GitHub
-release. As the Windows user who runs the show, in a normal (not elevated)
-PowerShell window:
+Pushing a `vX.Y.Z` tag runs the controller checks, then attaches
+`party-visuals.exe`, the PowerShell 5.1 installers and `SHA256SUMS` to a draft
+GitHub release, as tycswap's release workflow does. Installations see a release
+only after its draft is reviewed and published. Nothing is code-signed. As the
+Windows user who runs the show, in a normal (not elevated) PowerShell window:
 
 1. Install Node.js 22 or later, Git and Chrome:
    `winget install --id OpenJS.NodeJS.LTS --exact`,
@@ -69,16 +70,17 @@ PowerShell window:
 $t = 'vX.Y.Z'; $f = "$env:TEMP\Install-PartyVisualsRelease.ps1"; [Net.ServicePointManager]::SecurityProtocol = 'Tls12'; Invoke-WebRequest -UseBasicParsing "https://github.com/tyclab/party-visuals/releases/download/$t/Install-PartyVisualsRelease.ps1" -OutFile $f; powershell -NoProfile -ExecutionPolicy Bypass -File $f -Tag $t
 ```
 
-It downloads the release to `%LOCALAPPDATA%\PartyVisuals\installer\<tag>`, checks
-every file against the release's `SHA256SUMS`, asks for the Music Assistant
-address and player id (the `player=` value of its now-playing page), names any
-missing prerequisite and runs Stage with the verified hash. Add `-Cutover` to
-activate the controller in the same run; visuals still begin Off and nothing is
-armed. `-MusicAssistantUrl`, `-Player`, `-ChromeExe`, `-NodeExe` and
-`-NodecgConfig` replace the prompts and defaults; `-ConfigPath` or
-`-ImportLegacy` go to Stage unchanged. Curtain, room and panel output need a
-reviewed `-ConfigPath`. `SHA256SUMS` comes from the same release, so it catches
-damaged or incomplete downloads; `-ExpectedSha256` also pins the executable to a
+It downloads the release to `%LOCALAPPDATA%\PartyVisuals\installer\<tag>` over
+https only, checks every file against its one line in the release's
+`SHA256SUMS`, asks for the Music Assistant address and player id (the `player=`
+value of its now-playing page), names any missing prerequisite and runs Stage
+with the verified hash. Add `-Cutover` to activate the controller in the same
+run; visuals still begin Off and nothing is armed. `-MusicAssistantUrl`,
+`-Player`, `-ChromeExe`, `-NodeExe` and `-NodecgConfig` replace the prompts and
+defaults; `-ConfigPath` or `-ImportLegacy` go to Stage unchanged. Curtain, room
+and panel output need a reviewed `-ConfigPath`. `SHA256SUMS` comes from the same
+release, so, as for tycswap's upgrade, it catches damaged or incomplete
+downloads but is no signature; `-ExpectedSha256` also pins the executable to a
 hash reviewed elsewhere, such as the release job log. After the first Start,
 sign in to Music Assistant once in the dedicated browser window.
 

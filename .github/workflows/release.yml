@@ -4,6 +4,8 @@ on:
     tags: ['v[0-9]+.[0-9]+.[0-9]+*']
 permissions:
   contents: read
+concurrency:
+  group: release-${{ github.ref }}
 jobs:
   checks:
     uses: ./.github/workflows/controller.yml
@@ -17,16 +19,20 @@ jobs:
         with:
           name: party-visuals-controller
           path: dist
-      - name: Publish release
+      - name: Draft release
         working-directory: dist
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
+          set -euo pipefail
           sha256sum --check --strict SHA256SUMS
           {
             printf 'Windows controller %s. Install or update: https://github.com/%s/blob/%s/controller/README.md#installation\n\nSHA256SUMS:\n\n```\n' "$TAG" "$GITHUB_REPOSITORY" "$TAG"
             cat SHA256SUMS
             printf '```\n'
           } > "$RUNNER_TEMP/notes.md"
-          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "party-visuals $TAG" --notes-file "$RUNNER_TEMP/notes.md" ./*
+          gh release view "$TAG" -R "$GITHUB_REPOSITORY" > /dev/null 2>&1 ||
+            gh release create "$TAG" -R "$GITHUB_REPOSITORY" --draft --verify-tag \
+              --title "party-visuals $TAG" --notes-file "$RUNNER_TEMP/notes.md"
+          gh release upload "$TAG" ./* --clobber -R "$GITHUB_REPOSITORY"
