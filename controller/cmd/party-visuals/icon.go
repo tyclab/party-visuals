@@ -20,8 +20,22 @@ var icons embed.FS
 
 var iconSizes = []int{16, 24, 32, 48, 64}
 
-// trayIconSize matches tycswap's own tray: Windows scales this PNG to the notification area.
-const trayIconSize = 32
+// defaultTrayIconSize is tycswap's tray size, used when Windows reports no small-icon size.
+const defaultTrayIconSize = 32
+
+// traySize picks the smallest embedded PNG covering the notification area's
+// icon size, so Windows shows it 1:1 or scales it down, never up.
+func traySize(small int) int {
+	if small <= 0 {
+		return defaultTrayIconSize
+	}
+	for _, s := range iconSizes {
+		if s >= small {
+			return s
+		}
+	}
+	return iconSizes[len(iconSizes)-1]
+}
 
 func iconPNG(size int) ([]byte, error) {
 	b, e := icons.ReadFile(fmt.Sprintf("icon/krake-rainbow-%d.png", size))
@@ -39,7 +53,7 @@ func iconPNG(size int) ([]byte, error) {
 }
 
 func icon() tray.Icon {
-	if b, e := iconPNG(trayIconSize); e == nil {
+	if b, e := iconPNG(traySize(smallIconSize())); e == nil {
 		return tray.Icon{PNG: b}
 	}
 	return tray.Icon{PNG: discPNG()}

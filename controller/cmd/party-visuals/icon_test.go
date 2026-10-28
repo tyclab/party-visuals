@@ -24,8 +24,16 @@ func TestEmbeddedIconsDecodeAtTheirSizes(t *testing.T) {
 	}
 }
 
+func TestTraySizeCoversTheNotificationArea(t *testing.T) {
+	for small, want := range map[int]int{0: 32, -1: 32, 16: 16, 20: 24, 24: 24, 28: 32, 32: 32, 40: 48, 48: 48, 64: 64, 80: 64} {
+		if got := traySize(small); got != want {
+			t.Errorf("traySize(%d) = %d, want %d", small, got, want)
+		}
+	}
+}
+
 func TestTrayUsesTheRainbowMark(t *testing.T) {
-	want, e := iconPNG(trayIconSize)
+	want, e := iconPNG(traySize(smallIconSize()))
 	if e != nil {
 		t.Fatal(e)
 	}

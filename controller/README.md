@@ -16,7 +16,10 @@ release Freeze/Blackout or stop music.
 The tray shows a rainbow TycStation Krake mark. Its source is
 `cmd/party-visuals/icon/krake-rainbow.svg`; the embedded 16–64 px PNGs are
 rendered from it with per-size stroke widths by headless Chrome or Chromium:
-`CHROME=/path/to/chrome go generate ./cmd/party-visuals`.
+`CHROME=/path/to/chrome go generate ./cmd/party-visuals`. The tray takes the
+smallest PNG that covers Windows' notification-icon size at the system scale
+(16 px at 100 %, 24 px at 125–150 %, 32 px at 175–200 %), so Windows never
+enlarges it; without that metric it takes 32 px, as tycswap's tray does.
 
 ```
 party-visuals app
