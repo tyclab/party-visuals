@@ -27,8 +27,9 @@ function Save-ControllerJson([string] $Path, $Value) {
 function Protect-ControllerFolder([string] $Path) {
     $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
     $acl = New-Object Security.AccessControl.DirectorySecurity
-    $acl.SetSecurityDescriptorSddlForm("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;$sid)")
-    Set-Acl -LiteralPath $Path -AclObject $acl
+    $acl.SetSecurityDescriptorSddlForm("D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;$sid)", [Security.AccessControl.AccessControlSections]::Access)
+    $folder = New-Object IO.DirectoryInfo($Path)
+    if ($PSVersionTable.PSEdition -eq 'Core') { [IO.FileSystemAclExtensions]::SetAccessControl($folder, $acl) } else { $folder.SetAccessControl($acl) }
 }
 function Assert-OwnedTask($Task, [string] $ExpectedFile) {
     if ($null -eq $Task) { return }

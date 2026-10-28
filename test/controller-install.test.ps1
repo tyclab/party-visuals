@@ -10,6 +10,14 @@ $JournalPath = Join-Path $sandbox 'migration.json'
 $script:checks = 0
 function Check($Name, $Ok) { if (-not $Ok) { throw "FAIL $Name" }; $script:checks++; Write-Host "ok $Name" }
 try {
+    $protected = Join-Path $sandbox 'protected'
+    New-Item -ItemType Directory -Path $protected | Out-Null
+    Protect-ControllerFolder $protected
+    Protect-ControllerFolder $protected
+    $acl = Get-Acl -LiteralPath $protected
+    $allowed = @($acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier]) | ForEach-Object { $_.IdentityReference.Value })
+    $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+    Check 'folder protection repeats without SACL privilege and allows only current user and SYSTEM' ($acl.AreAccessRulesProtected -and $allowed.Count -eq 2 -and $allowed -contains $sid -and $allowed -contains 'S-1-5-18')
     $path = Join-Path $sandbox 'intent.json'
     Save-ControllerJson $path @{ version = 1; manualOff = $true; requested = $false; mode = 'manual' }
     Save-ControllerJson $path @{ version = 1; manualOff = $true; requested = $false; mode = 'follow-party' }
