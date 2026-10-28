@@ -3,6 +3,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:
 permissions:
   contents: read
 jobs:
@@ -53,12 +54,25 @@ jobs:
       - name: Package controller
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          VERSION: ${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
         run: |
-          cd controller
-          go build -trimpath -ldflags "-s -w -X main.version=${{ github.sha }}" -o "$env:RUNNER_TEMP\party-visuals.exe" ./cmd/party-visuals
-          Get-FileHash "$env:RUNNER_TEMP\party-visuals.exe" -Algorithm SHA256 | Format-List
+          $dist = Join-Path $env:RUNNER_TEMP 'party-visuals-controller'
+          New-Item -ItemType Directory -Path $dist | Out-Null
+          Push-Location controller
+          go build -trimpath -ldflags "-s -w -X main.version=$env:VERSION" -o (Join-Path $dist 'party-visuals.exe') ./cmd/party-visuals
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          Pop-Location
+          foreach ($name in 'Install-PartyVisualsRelease.ps1', 'Install-PartyVisualsController.ps1', 'Run-PartyVisualsSession.ps1', 'Start-PartyVisualsBrowser.ps1', 'Start-PartyVisualsNodecg.ps1') {
+            Copy-Item -LiteralPath (Join-Path install $name) -Destination $dist
+          }
+          $lines = foreach ($file in Get-ChildItem -LiteralPath $dist -File | Sort-Object Name) {
+            '{0}  {1}' -f (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant(), $file.Name
+          }
+          [IO.File]::WriteAllText((Join-Path $dist 'SHA256SUMS'), (($lines -join "`n") + "`n"))
+          $lines
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
         if: runner.os == 'Windows'
         with:
           name: party-visuals-controller
-          path: ${{ runner.temp }}/party-visuals.exe
+          path: ${{ runner.temp }}/party-visuals-controller

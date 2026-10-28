@@ -1,0 +1,32 @@
+name: Release
+on:
+  push:
+    tags: ['v[0-9]+.[0-9]+.[0-9]+*']
+permissions:
+  contents: read
+jobs:
+  checks:
+    uses: ./.github/workflows/controller.yml
+  publish:
+    needs: checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: party-visuals-controller
+          path: dist
+      - name: Publish release
+        working-directory: dist
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          sha256sum --check --strict SHA256SUMS
+          {
+            printf 'Windows controller %s. Install or update: https://github.com/%s/blob/%s/controller/README.md#installation\n\nSHA256SUMS:\n\n```\n' "$TAG" "$GITHUB_REPOSITORY" "$TAG"
+            cat SHA256SUMS
+            printf '```\n'
+          } > "$RUNNER_TEMP/notes.md"
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --verify-tag --title "party-visuals $TAG" --notes-file "$RUNNER_TEMP/notes.md" ./*
