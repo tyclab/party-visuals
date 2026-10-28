@@ -13,6 +13,11 @@ resources after the display settles. Shared OpenRGB is read-only: Stop never
 kills it or writes a lighting mode/profile. Local actions never arm the rig,
 release Freeze/Blackout or stop music.
 
+The tray shows a rainbow TycStation Krake mark. Its source is
+`cmd/party-visuals/icon/krake-rainbow.svg`; the embedded 16–64 px PNGs are
+rendered from it with per-size stroke widths by headless Chrome or Chromium:
+`CHROME=/path/to/chrome go generate ./cmd/party-visuals`.
+
 ```
 party-visuals app
 party-visuals menu
