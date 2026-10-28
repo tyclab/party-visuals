@@ -42,9 +42,15 @@ function Assert-OwnedTask($Task, [string] $ExpectedFile) {
             Initialize-ControllerArguments
             $args = [PartyBrowserNative]::Arguments('launcher ' + $actions[0].Arguments)
             $exe = [IO.Path]::GetFileName($actions[0].Execute)
-            for ($i = 1; $i -lt $args.Count - 1; $i++) {
+            $isPowerShell = $exe -ieq 'powershell.exe'
+            $first = 1
+            if ($exe -ieq 'conhost.exe' -and $args.Count -gt 3) {
+                $isPowerShell = [IO.Path]::GetFullPath($actions[0].Execute) -ieq (Join-Path $env:SystemRoot 'System32\conhost.exe') -and $args[1] -eq '--headless' -and [IO.Path]::GetFullPath($args[2]) -ieq (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe')
+                $first = 3
+            }
+            for ($i = $first; $i -lt $args.Count - 1; $i++) {
                 if ($args[$i] -ieq '-File') {
-                    $owned = $exe -ieq 'powershell.exe' -and [IO.Path]::GetFullPath($args[$i + 1]) -ieq [IO.Path]::GetFullPath($ExpectedFile)
+                    $owned = $isPowerShell -and [IO.Path]::GetFullPath($args[$i + 1]) -ieq [IO.Path]::GetFullPath($ExpectedFile)
                     break
                 }
                 if ($args[$i] -ieq '-Command' -or $args[$i] -ieq '-EncodedCommand') { break }

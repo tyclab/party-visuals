@@ -28,6 +28,13 @@ try {
     $owned = [pscustomobject]@{ TaskName='test'; Actions=@([pscustomobject]@{Execute='powershell.exe';Arguments=('-NoProfile -File "' + $expected + '" -BrowserProfile "C:\dedicated profile"')}) }
     Assert-OwnedTask $owned $expected
     Check 'owned task matches exact File argument and preserves profile Stop argument' ((@(Get-StopArguments $owned) -join '|') -eq '-BrowserProfile|C:\dedicated profile')
+    $wrapped = [pscustomobject]@{ TaskName='test'; Actions=@([pscustomobject]@{Execute=(Join-Path $env:SystemRoot 'System32\conhost.exe');Arguments=('--headless "' + (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') + '" -NoProfile -File "' + $expected + '"')}) }
+    Assert-OwnedTask $wrapped $expected
+    Check 'existing system conhost headless wrapper is recognized' $true
+    $wrapped.Actions[0].Arguments = '--headless C:\other\powershell.exe -File "' + $expected + '"'
+    $refused = $false
+    try { Assert-OwnedTask $wrapped $expected } catch { $refused = $true }
+    Check 'headless wrapper cannot substitute another executable' $refused
     $owned.Actions[0].Arguments = '-File C:\foreign.ps1 -Note "' + $expected + '"'
     $refused = $false
     try { Assert-OwnedTask $owned $expected } catch { $refused = $true }
