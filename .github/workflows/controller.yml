@@ -48,6 +48,8 @@ jobs:
           & .\test\nodecg-start.test.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & .\test\controller-install.test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\test\release-install.test.ps1
       - name: Package controller
         if: runner.os == 'Windows'
         shell: pwsh

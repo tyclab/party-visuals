@@ -17,6 +17,6 @@ Read for this topic; paths below are relative to the repository root unless stat
   `powershell -NoProfile -ExecutionPolicy Bypass -File test\install.test.ps1`.
 - The native controller uses `controller/` and the run-once session worker;
   never wrap the legacy restart loops with a second supervisor. Run its Go
-  checks and `test/controller-install.test.ps1`. Native dummy-process tests
+  checks, `test/controller-install.test.ps1` and `test/release-install.test.ps1`. Native dummy-process tests
   do not replace actual Chrome/power acceptance. Installation stays staged
   until the deployment interlock permits the owned launcher handoff.
