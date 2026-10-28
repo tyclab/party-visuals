@@ -5,7 +5,7 @@ param(
     [string] $NodeExe = "$env:ProgramFiles\nodejs\node.exe",
     [string] $BrowserProfile = "$env:LOCALAPPDATA\PartyVisuals\browser-profile",
     [string] $HelperPath = "$env:LOCALAPPDATA\PartyVisuals\browser-visuals\cli.js",
-    [string] $VisualizerUrl = 'http://10.27.2.42:8095/#/now-playing?player=02%3A01%3Abb%3A12%3A81%3A49&frameless=1',
+    [string] $VisualizerUrl = '',
     [string] $ControlsUrl = 'http://127.0.0.1:9090/bundles/party-visuals/api/state',
     [string] $TelemetryFile = "$env:LOCALAPPDATA\PartyVisuals\logs\browser-visuals.ndjson",
     [string] $StatusFile = '',
@@ -338,6 +338,7 @@ function Invoke-BrowserLauncher {
     if (@(@($Stop, $Resume, $Register) | Where-Object { $_ }).Count -gt 1) { throw 'Use only one of -Stop, -Resume and -Register.' }
     if ($Stop) { return Request-VisualsStop }
     if ($Resume) { return Request-VisualsResume }
+    if (-not $VisualizerUrl) { throw 'Pass -VisualizerUrl or set visualizerUrl in the controller configuration.' }
     if ($Register) { return Register-VisualsTask $LaunchParameters }
     return Start-VisualsBrowser
 }
