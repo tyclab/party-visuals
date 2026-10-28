@@ -3,12 +3,15 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"github.com/tyclab/party-visuals/controller/internal/lifecycle"
 	"github.com/tyclab/party-visuals/controller/internal/owner"
+	"github.com/tyclab/party-visuals/controller/internal/partysource"
 	"github.com/tyclab/party-visuals/controller/internal/worker"
 	"github.com/tyclab/tycswap/desktop/tray"
+	"log"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -19,6 +22,13 @@ import (
 )
 
 var version = "dev"
+
+type statusView struct {
+	Version     string             `json:"version"`
+	State       lifecycle.Status   `json:"state"`
+	Diagnostics worker.Diagnostics `json:"diagnostics"`
+	FollowParty partysource.Status `json:"followParty"`
+}
 
 func main() {
 	if e := run(os.Args[1:]); e != nil {
@@ -53,14 +63,33 @@ func run(args []string) error {
 		if e != nil {
 			return e
 		}
-		fmt.Printf("Configuration valid; worker %s; no processes started\n", filepath.Base(c.WorkerScript))
+		follow := partysource.Unconfigured
+		if c.HomeAssistantURL != "" {
+			if _, e = partysource.ReadToken(c.HomeAssistantTokenFile); e != nil {
+				return e
+			}
+			follow = "polls Home Assistant " + c.PartyEntity
+		}
+		fmt.Printf("Configuration valid; worker %s; Follow Party: %s; no processes started\n", filepath.Base(c.WorkerScript), follow)
 		return nil
-	case "status", "diagnostics":
+	case "status":
+		return invoke(*root, "")
+	case "diagnostics":
 		b, e := owner.Call(*root, "")
 		if e != nil {
 			return e
 		}
-		fmt.Println(string(b))
+		var s statusView
+		if e = json.Unmarshal(b, &s); e != nil {
+			return e
+		}
+		fmt.Println("Party Visuals · " + s.State.Phase)
+		if s.State.Reason != "" {
+			fmt.Println(s.State.Reason)
+		}
+		for _, line := range diagnosticLines(s.Diagnostics, s.FollowParty) {
+			fmt.Println(line)
+		}
 		return nil
 	case "start", "stop", "show", "quit":
 		return invoke(*root, a[0])
@@ -126,10 +155,21 @@ func app(root string) error {
 		return e
 	}
 	defer l.Close()
-	if e = releaseAppConsole(root); e != nil {
+	logFile, e := openLog(root)
+	if e != nil {
 		return e
 	}
+	defer logFile.Close()
+	if e = releaseAppConsole(logFile); e != nil {
+		return e
+	}
+	logger := log.New(logFile, "", log.LstdFlags)
+	logger.Printf("controller %s started", version)
 	var m *lifecycle.Manager
+	var source *partysource.Source
+	if c.HomeAssistantURL != "" {
+		source = partysource.New(partysource.Config{URL: c.HomeAssistantURL, TokenFile: c.HomeAssistantTokenFile, Entity: c.PartyEntity, Value: c.PartyValue, Poll: time.Duration(c.PartyPollMs) * time.Millisecond}, func(command string) error { return m.Apply(command) }, logger.Printf)
+	}
 	var eventMu sync.Mutex
 	var eventGeneration uint64
 	var t tray.Tray
@@ -141,11 +181,7 @@ func app(root string) error {
 		diagMu.Lock()
 		d := diag
 		diagMu.Unlock()
-		return struct {
-			Version     string             `json:"version"`
-			State       lifecycle.Status   `json:"state"`
-			Diagnostics worker.Diagnostics `json:"diagnostics"`
-		}{version, m.Snapshot(), d}
+		return statusView{version, m.Snapshot(), d, source.Status()}
 	}
 	refresh := func(s lifecycle.Status) {
 		if t == nil {
@@ -155,7 +191,11 @@ func app(root string) error {
 		d := diag
 		diagMu.Unlock()
 		t.SetTooltip("Party Visuals · " + s.Phase)
-		t.SetMenu([]tray.Item{{Title: "Party Visuals · " + s.Phase, Disabled: true}, {Title: s.Reason, Disabled: true}, {ID: "start", Title: "Start visuals", Disabled: s.Phase == "starting" || s.Phase == "running"}, {ID: "stop", Title: "Stop visuals"}, {Separator: true}, {Title: "Screen: " + d.Screen, Disabled: true}, {Title: "Audio: " + d.Audio, Disabled: true}, {Title: "OpenRGB: " + d.OpenRGB, Disabled: true}, {ID: "show", Title: "Open Music Assistant controls"}, {ID: "diagnostics", Title: "Diagnostics / interactive menu"}, {Separator: true}, {ID: "manual", Title: "Manual", Checked: s.Intent.Mode == "manual"}, {ID: "follow-party", Title: "Follow Party", Checked: s.Intent.Mode == "follow-party"}, {ID: "quit", Title: "Stop visuals and quit"}})
+		items := []tray.Item{{Title: "Party Visuals · " + s.Phase, Disabled: true}, {Title: s.Reason, Disabled: true}, {ID: "start", Title: "Start visuals", Disabled: s.Phase == "starting" || s.Phase == "running"}, {ID: "stop", Title: "Stop visuals"}, {Separator: true}}
+		for _, line := range diagnosticLines(d, source.Status()) {
+			items = append(items, tray.Item{Title: line, Disabled: true})
+		}
+		t.SetMenu(append(items, tray.Item{ID: "show", Title: "Open Music Assistant controls"}, tray.Item{ID: "diagnostics", Title: "Diagnostics / interactive menu"}, tray.Item{Separator: true}, tray.Item{ID: "manual", Title: "Manual", Checked: s.Intent.Mode == "manual"}, tray.Item{ID: "follow-party", Title: "Follow Party", Checked: s.Intent.Mode == "follow-party"}, tray.Item{ID: "quit", Title: "Stop visuals and quit"}))
 	}
 	command := func(command string) error {
 		switch command {
@@ -214,7 +254,10 @@ func app(root string) error {
 	if e != nil {
 		return e
 	}
-	m, e = lifecycle.New(lifecycle.FileStore{Path: filepath.Join(root, "intent.json")}, worker.Backend{Config: c, ConfigPath: filepath.Join(root, "config.json")}, refresh)
+	m, e = lifecycle.New(lifecycle.FileStore{Path: filepath.Join(root, "intent.json")}, worker.Backend{Config: c, ConfigPath: filepath.Join(root, "config.json")}, func(s lifecycle.Status) {
+		source.SetActive(s.Intent.Mode == "follow-party")
+		refresh(s)
+	})
 	if e != nil {
 		return e
 	}
@@ -225,6 +268,10 @@ func app(root string) error {
 	}
 	defer server.Close()
 	refresh(m.Snapshot())
+	if source != nil {
+		source.SetActive(m.Snapshot().Intent.Mode == "follow-party")
+		go source.Run(ctx)
+	}
 	go func() {
 		tick := time.NewTicker(3 * time.Second)
 		defer tick.Stop()
@@ -258,6 +305,22 @@ func app(root string) error {
 	return t.Run()
 }
 
+func diagnosticLines(d worker.Diagnostics, p partysource.Status) []string {
+	return []string{"Screen: " + d.Screen, "Audio: " + d.Audio, "OpenRGB: " + d.OpenRGB, "Follow Party: " + p.Summary}
+}
+
+// openLog opens controller.log in root for appending, first moving a log
+// over 1 MiB to controller.log.1.
+func openLog(root string) (*os.File, error) {
+	path := filepath.Join(root, "controller.log")
+	if info, e := os.Stat(path); e == nil && info.Size() > 1024*1024 {
+		os.Remove(path + ".1")
+		if e = os.Rename(path, path+".1"); e != nil {
+			return nil, e
+		}
+	}
+	return os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
+}
 func openURL(raw string) error {
 	u := strings.Split(raw, "#")[0]
 	return desktopOpen(u)

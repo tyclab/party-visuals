@@ -6,24 +6,12 @@ import (
 	"golang.org/x/sys/windows"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"runtime"
 	"syscall"
 	"unsafe"
 )
 
-func releaseAppConsole(root string) error {
-	path := filepath.Join(root, "controller.log")
-	if info, e := os.Stat(path); e == nil && info.Size() > 1024*1024 {
-		os.Remove(path + ".1")
-		if e = os.Rename(path, path+".1"); e != nil {
-			return e
-		}
-	}
-	log, e := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600)
-	if e != nil {
-		return e
-	}
+func releaseAppConsole(log *os.File) error {
 	os.Stdout, os.Stderr = log, log
 	dll := windows.NewLazySystemDLL("kernel32.dll")
 	var pids [2]uint32
