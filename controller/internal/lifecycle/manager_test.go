@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -13,16 +14,22 @@ type fakeSession struct {
 	done    chan error
 	once    sync.Once
 	stopped chan struct{}
+	stopErr error
 }
 
-func (s *fakeSession) Done() <-chan error         { return s.done }
-func (s *fakeSession) Stop(context.Context) error { s.once.Do(func() { close(s.stopped) }); return nil }
+func (s *fakeSession) Done() <-chan error { return s.done }
+func (s *fakeSession) Stop(context.Context) error {
+	s.once.Do(func() { close(s.stopped) })
+	return s.stopErr
+}
+func (s *fakeSession) end(err error) { s.done <- err; close(s.done) }
 
 type fakeBackend struct {
 	mu       sync.Mutex
 	sessions []*fakeSession
 	gate     chan struct{}
 	starting chan struct{}
+	stopErr  error
 }
 
 func (b *fakeBackend) Start(ctx context.Context) (Session, error) {
@@ -39,8 +46,8 @@ func (b *fakeBackend) Start(ctx context.Context) (Session, error) {
 			return nil, ctx.Err()
 		}
 	}
-	s := &fakeSession{done: make(chan error, 1), stopped: make(chan struct{})}
 	b.mu.Lock()
+	s := &fakeSession{done: make(chan error, 1), stopped: make(chan struct{}), stopErr: b.stopErr}
 	b.sessions = append(b.sessions, s)
 	b.mu.Unlock()
 	return s, nil
@@ -261,4 +268,61 @@ func TestStaleSessionCompletionCannotStopNewStart(t *testing.T) {
 		t.Fatal("stale completion stopped newer worker")
 	default:
 	}
+}
+
+func (b *fakeBackend) count() int { b.mu.Lock(); defer b.mu.Unlock(); return len(b.sessions) }
+
+func TestFailedStopBlocksANewWorkerOnlyUntilTheOldOneEnds(t *testing.T) {
+	b := &fakeBackend{stopErr: errors.New("owned worker did not exit")}
+	m, _ := newManager(t, b)
+	m.Apply("start")
+	eventually(t, func() bool { return m.Snapshot().Phase == "running" })
+	m.Apply("suspend")
+	eventually(t, func() bool { return strings.Contains(m.Snapshot().Reason, "did not stop") })
+	for _, c := range []string{"resume", "start"} {
+		m.Apply(c)
+		eventually(t, func() bool { return m.Snapshot().Phase == "attention" })
+		if b.count() != 1 {
+			t.Fatalf("%s started a second worker beside one that may still run", c)
+		}
+	}
+	b.mu.Lock()
+	first := b.sessions[0]
+	b.mu.Unlock()
+	first.end(nil)
+	m.Apply("start")
+	eventually(t, func() bool { return m.Snapshot().Phase == "running" })
+	if b.count() != 2 {
+		t.Fatalf("expected one fresh worker, have %d sessions", b.count())
+	}
+}
+
+func TestResumeStartsFreshAfterASuspendStopFailedAndTheWorkerEnded(t *testing.T) {
+	b := &fakeBackend{stopErr: errors.New("owned worker did not exit")}
+	m, _ := newManager(t, b)
+	m.Apply("start")
+	eventually(t, func() bool { return m.Snapshot().Phase == "running" })
+	m.Apply("suspend")
+	eventually(t, func() bool { return m.Snapshot().Phase == "attention" })
+	b.mu.Lock()
+	b.sessions[0].end(nil)
+	b.mu.Unlock()
+	m.Apply("resume")
+	eventually(t, func() bool { return m.Snapshot().Phase == "running" && b.count() == 2 })
+}
+
+func TestStopOfAnEndedSessionIsNotAnError(t *testing.T) {
+	b := &fakeBackend{stopErr: errors.New("process already gone")}
+	m, _ := newManager(t, b)
+	m.Apply("start")
+	eventually(t, func() bool { return m.Snapshot().Phase == "running" })
+	b.mu.Lock()
+	b.sessions[0].end(nil)
+	b.mu.Unlock()
+	eventually(t, func() bool { return m.Snapshot().Intent.ManualOff && m.Snapshot().Phase == "attention" })
+	if r := m.Snapshot().Reason; strings.Contains(r, "did not stop") {
+		t.Fatalf("ended session reported as still running: %s", r)
+	}
+	m.Apply("start")
+	eventually(t, func() bool { return m.Snapshot().Phase == "running" && b.count() == 2 })
 }

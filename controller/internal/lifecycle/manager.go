@@ -23,6 +23,7 @@ type Status struct {
 	Suspended  bool   `json:"suspended"`
 }
 
+// Session is one running worker. Done delivers its exit error once, then closes.
 type Session interface {
 	Stop(context.Context) error
 	Done() <-chan error
@@ -169,13 +170,22 @@ func (m *Manager) publish(gen uint64, phase, reason string) {
 	m.notify(s)
 }
 
+// stop ends session; a failure counts only while the session has not ended,
+// so a session that ended after an earlier failed stop is dropped, not kept.
 func stop(session Session) error {
 	if session == nil {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 55*time.Second)
 	defer cancel()
-	return session.Stop(ctx)
+	if err := session.Stop(ctx); err != nil {
+		select {
+		case <-session.Done():
+		default:
+			return err
+		}
+	}
+	return nil
 }
 
 func (m *Manager) reconcile(ctx context.Context, gen uint64, want bool) {
