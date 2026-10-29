@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"syscall"
 	"unsafe"
 )
@@ -43,4 +44,24 @@ func desktopOpen(url string) error {
 	}
 	op, _ := windows.UTF16PtrFromString("open")
 	return windows.ShellExecute(0, op, u, nil, nil, windows.SW_SHOWNORMAL)
+}
+
+// smallIconSize is SM_CXSMICON at the system DPI, the notification area's
+// icon size; 0 when this Windows cannot report it per DPI.
+func smallIconSize() int {
+	user32 := windows.NewLazySystemDLL("user32.dll")
+	aware, system, metric := user32.NewProc("SetThreadDpiAwarenessContext"), user32.NewProc("GetDpiForSystem"), user32.NewProc("GetSystemMetricsForDpi")
+	if aware.Find() != nil || system.Find() != nil || metric.Find() != nil {
+		return 0
+	}
+	runtime.LockOSThread()
+	defer runtime.UnlockOSThread()
+	previous, _, _ := aware.Call(^uintptr(3)) // per-monitor aware v2 for this thread; an unaware thread reads 96 DPI
+	if previous == 0 {
+		return 0
+	}
+	defer aware.Call(previous)
+	dpi, _, _ := system.Call()
+	size, _, _ := metric.Call(49, dpi) // SM_CXSMICON
+	return int(size)
 }

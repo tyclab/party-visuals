@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"flag"
 	"fmt"
@@ -10,9 +9,6 @@ import (
 	"github.com/tyclab/party-visuals/controller/internal/owner"
 	"github.com/tyclab/party-visuals/controller/internal/worker"
 	"github.com/tyclab/tycswap/desktop/tray"
-	"image"
-	"image/color"
-	"image/png"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -120,22 +116,6 @@ func menu(root string) error {
 		}
 	}
 }
-func icon() tray.Icon {
-	im := image.NewRGBA(image.Rect(0, 0, 32, 32))
-	for y := 0; y < 32; y++ {
-		for x := 0; x < 32; x++ {
-			c := color.RGBA{22, 20, 38, 255}
-			if (x-16)*(x-16)+(y-16)*(y-16) < 150 {
-				c = color.RGBA{142, 102, 255, 255}
-			}
-			im.SetRGBA(x, y, c)
-		}
-	}
-	var b bytes.Buffer
-	png.Encode(&b, im)
-	return tray.Icon{PNG: b.Bytes()}
-}
-
 func app(root string) error {
 	c, e := worker.Load(filepath.Join(root, "config.json"))
 	if e != nil {
