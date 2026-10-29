@@ -18,12 +18,20 @@ type Backend struct {
 	Config     Config
 	ConfigPath string
 }
+
+const (
+	gracefulStop = 45 * time.Second
+	exitWait     = 5 * time.Second
+)
+
 type session struct {
 	cmd      *exec.Cmd
 	in       io.WriteCloser
 	job      job
 	done     chan error
 	exited   chan struct{}
+	grace    time.Duration
+	exitWait time.Duration
 	mu       sync.Mutex
 	stopOnce sync.Once
 	stopErr  error
@@ -52,7 +60,7 @@ func (b Backend) Start(ctx context.Context) (lifecycle.Session, error) {
 		j.Close()
 		return nil, e
 	}
-	s := &session{cmd: cmd, in: in, job: j, done: make(chan error, 1), exited: make(chan struct{})}
+	s := &session{cmd: cmd, in: in, job: j, done: make(chan error, 1), exited: make(chan struct{}), grace: gracefulStop, exitWait: exitWait}
 	if e = j.Assign(cmd.Process); e != nil {
 		cmd.Process.Kill()
 		cmd.Wait()
@@ -82,8 +90,7 @@ func (b Backend) Start(ctx context.Context) (lifecycle.Session, error) {
 			}
 		}
 		err := cmd.Wait()
-		s.done <- err
-		close(s.exited)
+		s.finish(err)
 		select {
 		case ready <- fmt.Errorf("visuals worker ended before ready: %v", err):
 		default:
@@ -111,13 +118,17 @@ func (b Backend) Start(ctx context.Context) (lifecycle.Session, error) {
 	return s, nil
 }
 func (s *session) Done() <-chan error { return s.done }
+func (s *session) finish(err error) {
+	s.done <- err
+	close(s.exited)
+}
 func (s *session) Stop(ctx context.Context) error {
 	s.stopOnce.Do(func() {
 		s.mu.Lock()
 		_, _ = io.WriteString(s.in, "stop\n")
 		_ = s.in.Close()
 		s.mu.Unlock()
-		timer := time.NewTimer(45 * time.Second)
+		timer := time.NewTimer(s.grace)
 		defer timer.Stop()
 		select {
 		case <-s.exited:
@@ -129,7 +140,7 @@ func (s *session) Stop(ctx context.Context) error {
 		}
 		select {
 		case <-s.exited:
-		case <-time.After(5 * time.Second):
+		case <-time.After(s.exitWait):
 			s.stopErr = errors.New("owned worker did not exit")
 		}
 	})
