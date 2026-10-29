@@ -34,7 +34,7 @@ type session struct {
 	exitWait time.Duration
 	mu       sync.Mutex
 	stopOnce sync.Once
-	stopErr  error
+	jobErr   error
 }
 
 func (b Backend) Start(ctx context.Context) (lifecycle.Session, error) {
@@ -120,8 +120,13 @@ func (b Backend) Start(ctx context.Context) (lifecycle.Session, error) {
 func (s *session) Done() <-chan error { return s.done }
 func (s *session) finish(err error) {
 	s.done <- err
+	close(s.done)
 	close(s.exited)
 }
+
+// Stop asks once for a graceful stop, then closes the job, ending every owned
+// process. Every call then reports only whether the worker has exited, so a
+// stop whose waits ran out, as across sleep, succeeds once the worker is gone.
 func (s *session) Stop(ctx context.Context) error {
 	s.stopOnce.Do(func() {
 		s.mu.Lock()
@@ -135,16 +140,21 @@ func (s *session) Stop(ctx context.Context) error {
 		case <-ctx.Done():
 		case <-timer.C:
 		}
-		if err := s.job.Close(); err != nil {
-			s.stopErr = err
-		}
-		select {
-		case <-s.exited:
-		case <-time.After(s.exitWait):
-			s.stopErr = errors.New("owned worker did not exit")
-		}
+		s.jobErr = s.job.Close()
 	})
-	return s.stopErr
+	timer := time.NewTimer(s.exitWait)
+	defer timer.Stop()
+	select {
+	case <-s.exited:
+		return nil
+	case <-timer.C:
+	}
+	select {
+	case <-s.exited:
+		return nil
+	default:
+		return errors.Join(s.jobErr, errors.New("owned worker did not exit"))
+	}
 }
 
 type job interface {
