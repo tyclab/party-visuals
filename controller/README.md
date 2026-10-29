@@ -27,6 +27,7 @@ party-visuals menu
 party-visuals start
 party-visuals stop
 party-visuals status --json
+party-visuals diagnostics
 party-visuals mode follow-party
 party-visuals party on
 party-visuals party off
@@ -35,9 +36,47 @@ party-visuals quit
 ```
 
 `--root PATH` precedes the command for a non-default controller directory.
-Follow Party is opt-in. Trusted local automation sends the explicit `party`
-event; Start enables following, and Stop overrides every later party event.
+`diagnostics` prints the phase and the tray's diagnostic lines; `status --json`
+holds everything, the Follow Party source under `followParty`.
+
+Follow Party is opt-in: select it in the tray or with `mode follow-party`.
+Start enables following, and Stop overrides every later party event.
 Armed/playing state is never inferred to be permission to start local visuals.
+The party event comes from Home Assistant. The controller's command endpoint
+accepts loopback calls only, so the controller pulls: while Follow Party is
+selected it reads one entity (`GET /api/states/<entity>` with a bearer token)
+every `partyPollMs` and sends `party on` when the state equals `partyValue`,
+`party off` for any other state. It sends once per change, and once for the
+first reading after each switch to Follow Party. Manual mode polls nothing.
+A failed reading (error, timeout, `unavailable`, `unknown`) keeps the last
+party state and retries after doubling delays of at most 60 s. Home Assistant
+counts every rejected bearer toward its IP ban, so an empty token file is
+refused before any request, and a 401/403 answer stops polling until the
+controller restarts. `party on|off` still sets the state by hand until the
+entity next changes. Each transition and failed reading is appended to
+`controller.log` in the controller directory; `diagnostics`, the tray and
+`status --json` show the source's state.
+
+The source is configured by optional keys in the controller's `config.json`.
+Without them nothing polls, Follow Party waits for `party on`, and diagnostics
+read "Follow Party: no Home Assistant source configured".
+
+```json
+"homeAssistantUrl": "https://ha.example.invalid:8123",
+"homeAssistantTokenFile": "C:\\Users\\<user>\\AppData\\Local\\PartyVisuals\\controller\\ha.token",
+"partyEntity": "sensor.house_mode_code",
+"partyValue": "3",
+"partyPollMs": 5000
+```
+
+The URL must be https. The token file holds one Home Assistant long-lived
+access token (profile, Security tab) and nothing else; a UTF-8 byte-order mark
+and surrounding whitespace are ignored. Keep it in the controller directory,
+which only the user and SYSTEM can read, never in `config.json` or this
+repository. The last three keys default to the values shown; `partyPollMs`
+takes 1000 to 60000. `check`, and with it Stage, refuses an http URL, a
+relative token path, an unreadable or empty token file and a malformed entity
+id.
 
 Diagnostics separate screen/helper, Lightshow analysis audio, output eligibility
 and OpenRGB SDK. Analysis frames do not prove MA visualizer audio is supported.
@@ -85,7 +124,10 @@ hash reviewed elsewhere, such as the release job log. After the first Start,
 sign in to Music Assistant once in the dedicated browser window.
 
 To update, choose **Stop visuals and quit** in the tray, then run the line again
-with the new tag and `-Cutover`. The active configuration is kept.
+with the new tag and `-Cutover`. The active configuration is kept. To change it,
+for example to add the Home Assistant keys, edit a copy of
+`%LOCALAPPDATA%\PartyVisuals\controller\config.json` and add
+`-ConfigPath <copy>` to that line.
 
 ### From a checkout
 

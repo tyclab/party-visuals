@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 )
 
 type Config struct {
@@ -28,7 +29,15 @@ type Config struct {
 	Panels         string `json:"panels"`
 	Fixture        int    `json:"fixture"`
 	FPS            int    `json:"fps"`
+	// Optional Follow Party source; the token stays in its own file.
+	HomeAssistantURL       string `json:"homeAssistantUrl"`
+	HomeAssistantTokenFile string `json:"homeAssistantTokenFile"`
+	PartyEntity            string `json:"partyEntity"`
+	PartyValue             string `json:"partyValue"`
+	PartyPollMs            int    `json:"partyPollMs"`
 }
+
+var entityID = regexp.MustCompile(`^[a-z0-9_]+\.[a-z0-9_]+$`)
 
 func Load(path string) (Config, error) {
 	f, e := os.Open(path)
@@ -65,6 +74,31 @@ func Load(path string) (Config, error) {
 	}
 	if c.BrowserProfile == "" || c.NodecgRoot == "" || c.LogFile == "" {
 		return c, errors.New("profile, NodeCG root and log path are required")
+	}
+	if c.HomeAssistantURL == "" && c.HomeAssistantTokenFile == "" && c.PartyEntity == "" && c.PartyValue == "" && c.PartyPollMs == 0 {
+		return c, nil
+	}
+	u, e = url.Parse(c.HomeAssistantURL)
+	if e != nil || u.Scheme != "https" || u.Host == "" || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return c, errors.New("homeAssistantUrl must be an https URL without credentials, query or fragment")
+	}
+	if !filepath.IsAbs(c.HomeAssistantTokenFile) {
+		return c, errors.New("homeAssistantTokenFile must be an absolute path")
+	}
+	if c.PartyEntity == "" {
+		c.PartyEntity = "sensor.house_mode_code"
+	}
+	if c.PartyValue == "" {
+		c.PartyValue = "3"
+	}
+	if c.PartyPollMs == 0 {
+		c.PartyPollMs = 5000
+	}
+	if !entityID.MatchString(c.PartyEntity) {
+		return c, errors.New("partyEntity must be a Home Assistant entity id such as sensor.house_mode_code")
+	}
+	if c.PartyPollMs < 1000 || c.PartyPollMs > 60000 {
+		return c, errors.New("partyPollMs must be between 1000 and 60000")
 	}
 	return c, nil
 }
