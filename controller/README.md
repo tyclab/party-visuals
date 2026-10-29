@@ -162,6 +162,11 @@ controller directory, separate from rig credentials. It binds an ephemeral
 loopback port, rejects browser Origins/wrong Hosts and bounds requests. Lock
 errors refuse a second owner. Children start only after Windows Job assignment;
 shutdown first attempts graceful stop, then ends remaining owned descendants.
+Sleep also stops visuals this way. A stop that sleep interrupts finishes at
+wake by ending the job. If the old worker is still exiting, the phase reads
+attention ("Owned processes did not stop") and no second worker starts; the
+next Start or resume after it has exited starts afresh without a controller
+restart.
 
 ## Validation
 
