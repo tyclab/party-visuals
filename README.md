@@ -1,5 +1,8 @@
 # TycStation Lightshow — party visuals
 
+For Windows visualizer Start/Stop, persistent Manual Off and tray controls,
+see the [controller installation and lifecycle](controller/README.md).
+
 Local party display controls and browser graphics that keep time with the TycStation
 Lightshow engine ([lightshow](https://github.com/tyclab/lightshow)). A
 [NodeCG](https://www.nodecg.dev) 2 bundle that runs in the same NodeCG as
@@ -139,7 +142,8 @@ For the native Music Assistant visualizer, install Chrome and copy
 from the matching TycStation Lightshow release to
 `%LOCALAPPDATA%\PartyVisuals\browser-visuals`, then run `npm.cmd ci --omit=dev`
 in that folder. Copy `Start-PartyVisualsBrowser.ps1` into the local startup folder.
-The default player URL selects SHD; configure `-VisualizerUrl` for another player.
+The launcher has no default player page: pass yours as `-VisualizerUrl`, for example
+`http://<music-assistant-host>:8095/#/now-playing?player=<player-id>&frameless=1`.
 Sign in to Music Assistant once in the dedicated browser profile.
 
 For playback-path limits and black-screen diagnosis, see
@@ -150,7 +154,7 @@ copied launcher, with the output switches the task should use, and start it:
 
 ```
 $launcher = "$env:LOCALAPPDATA\PartyVisuals\startup\Start-PartyVisualsBrowser.ps1"
-powershell -NoProfile -ExecutionPolicy Bypass -File $launcher -Register -Room -Curtain -Panels "38:20x6,39:20x6"
+powershell -NoProfile -ExecutionPolicy Bypass -File $launcher -Register -VisualizerUrl "http://<music-assistant-host>:8095/#/now-playing?player=<player-id>&frameless=1" -Room -Curtain -Panels "38:20x6,39:20x6"
 Start-ScheduledTask -TaskName 'PartyVisuals Browser'
 ```
 

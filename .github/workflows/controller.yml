@@ -1,0 +1,62 @@
+name: Controller
+on:
+  push:
+    branches: [main]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  bundle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - run: npm ci --ignore-scripts
+      - run: npm test
+  controller:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e
+        with:
+          go-version-file: controller/go.mod
+      - name: Native fixture
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cd controller
+          go build -o "$env:RUNNER_TEMP\party-child.exe" ./internal/worker/testdata/child
+          "PARTY_TEST_CHILD=$env:RUNNER_TEMP\party-child.exe" >> $env:GITHUB_ENV
+          "PARTY_TEST_SESSION_SCRIPT=$env:GITHUB_WORKSPACE\install\Run-PartyVisualsSession.ps1" >> $env:GITHUB_ENV
+      - run: go test ./...
+        working-directory: controller
+      - run: go vet ./...
+        working-directory: controller
+      - name: PowerShell 5.1 checks
+        if: runner.os == 'Windows'
+        shell: powershell
+        run: |
+          & .\test\install.test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\test\browser-start.test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\test\nodecg-start.test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & .\test\controller-install.test.ps1
+      - name: Package controller
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          cd controller
+          go build -trimpath -ldflags "-s -w -X main.version=${{ github.sha }}" -o "$env:RUNNER_TEMP\party-visuals.exe" ./cmd/party-visuals
+          Get-FileHash "$env:RUNNER_TEMP\party-visuals.exe" -Algorithm SHA256 | Format-List
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+        if: runner.os == 'Windows'
+        with:
+          name: party-visuals-controller
+          path: ${{ runner.temp }}/party-visuals.exe

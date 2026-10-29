@@ -15,3 +15,8 @@ Read for this topic; paths below are relative to the repository root unless stat
   reconnect backoff and clock continuity; tests use a local mock engine.
 - Installer changes must pass the Windows PowerShell 5.1 path:
   `powershell -NoProfile -ExecutionPolicy Bypass -File test\install.test.ps1`.
+- The native controller uses `controller/` and the run-once session worker;
+  never wrap the legacy restart loops with a second supervisor. Run its Go
+  checks and `test/controller-install.test.ps1`. Native dummy-process tests
+  do not replace actual Chrome/power acceptance. Installation stays staged
+  until the deployment interlock permits the owned launcher handoff.

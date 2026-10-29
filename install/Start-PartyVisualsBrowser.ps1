@@ -5,9 +5,10 @@ param(
     [string] $NodeExe = "$env:ProgramFiles\nodejs\node.exe",
     [string] $BrowserProfile = "$env:LOCALAPPDATA\PartyVisuals\browser-profile",
     [string] $HelperPath = "$env:LOCALAPPDATA\PartyVisuals\browser-visuals\cli.js",
-    [string] $VisualizerUrl = 'http://10.27.2.42:8095/#/now-playing?player=02%3A01%3Abb%3A12%3A81%3A49&frameless=1',
+    [string] $VisualizerUrl = '',
     [string] $ControlsUrl = 'http://127.0.0.1:9090/bundles/party-visuals/api/state',
     [string] $TelemetryFile = "$env:LOCALAPPDATA\PartyVisuals\logs\browser-visuals.ndjson",
+    [string] $StatusFile = '',
     [switch] $Curtain,
     [switch] $Room,
     [ValidatePattern('^(?:[0-9]+:[0-9]+x[0-9]+)(?:,[0-9]+:[0-9]+x[0-9]+)*$|^$')]
@@ -89,6 +90,7 @@ function Get-HelperArguments {
     '--visualizer-url'; $VisualizerUrl
     '--controls-url'; $ControlsUrl
     '--parent-pid'; [string]$PID
+    if ($StatusFile) { '--status-file'; $StatusFile }
     if ($Curtain -or $Room -or $Panels) { '--telemetry-file'; $TelemetryFile }
     if ($Curtain) {
         '--curtain'; '--nodecg-config'; $NodecgConfig
@@ -199,7 +201,7 @@ function Open-VisualsBrowser {
     return $browser
 }
 
-function Start-VisualsBrowser {
+function Assert-BrowserConfiguration {
     foreach ($path in @($ChromeExe, $NodeExe, $HelperPath)) {
         if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Required executable or helper is missing: $path" }
     }
@@ -210,6 +212,10 @@ function Start-VisualsBrowser {
     $visualizer = [uri]$VisualizerUrl
     $controls = [uri]$ControlsUrl
     if ($visualizer.Scheme -notin @('http', 'https') -or $visualizer.UserInfo -or $controls.Scheme -ne 'http' -or $controls.Host -ne '127.0.0.1' -or $controls.UserInfo) { throw 'Use a plain visualizer URL and loopback HTTP controls URL, without credentials.' }
+}
+
+function Start-VisualsBrowser {
+    Assert-BrowserConfiguration
     Initialize-BrowserNative
     $mutex = New-Object Threading.Mutex($false, 'Local\PartyVisuals-Browser-Launch')
     $owned = $false
@@ -332,6 +338,7 @@ function Invoke-BrowserLauncher {
     if (@(@($Stop, $Resume, $Register) | Where-Object { $_ }).Count -gt 1) { throw 'Use only one of -Stop, -Resume and -Register.' }
     if ($Stop) { return Request-VisualsStop }
     if ($Resume) { return Request-VisualsResume }
+    if (-not $VisualizerUrl) { throw 'Pass -VisualizerUrl or set visualizerUrl in the controller configuration.' }
     if ($Register) { return Register-VisualsTask $LaunchParameters }
     return Start-VisualsBrowser
 }

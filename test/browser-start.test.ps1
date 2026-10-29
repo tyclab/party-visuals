@@ -19,6 +19,7 @@ $StopFile = Join-Path ([IO.Path]::GetTempPath()) ('party-visuals-stop-' + [guid]
 $TaskName = 'PartyVisuals Browser Test ' + [guid]::NewGuid().ToString('N')
 Initialize-BrowserNative
 $BrowserProfile = 'C:\Users\Test User\AppData\Local\PartyVisuals\browser-profile'
+$VisualizerUrl = 'http://music-assistant.test:8095/#/now-playing?player=test-player&frameless=1'
 foreach ($value in @('plain', 'C:\trailing space\', 'a"quoted"b', 'http://example.test/#/?a=1&b=2', '')) {
     $roundtrip = [PartyBrowserNative]::Arguments('program.exe ' + (ConvertTo-NativeArgument $value))
     Check ('native argument round trip: ' + $value) ($roundtrip.Count -eq 2 -and $roundtrip[1] -ceq $value)
@@ -263,4 +264,13 @@ $Register = [switch]$true
 Throws 'only one management switch is accepted at a time' { Invoke-BrowserLauncher }
 $Register = [switch]$false
 $Stop = [switch]$false
+$VisualizerUrl = ''
+$script:events = @()
+$script:registered = $null
+$refusals = @(foreach ($asTask in @($true, $false)) { $Register = [switch]$asTask; try { Invoke-BrowserLauncher } catch { $_.Exception.Message } })
+$Register = [switch]$false
+$Stop = [switch]$true
+$stopMode = Invoke-BrowserLauncher
+$Stop = [switch]$false
+Check 'without a visualizer URL launch and registration fail fast, -Stop still runs' ($refusals.Count -eq 2 -and @($refusals | Where-Object { $_ -cne 'Pass -VisualizerUrl or set visualizerUrl in the controller configuration.' }).Count -eq 0 -and $script:events.Count -eq 0 -and $null -eq $script:registered -and $stopMode -eq 'stop-mode')
 Write-Host "$script:passed passed, 0 failed"
