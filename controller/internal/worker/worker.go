@@ -17,6 +17,10 @@ import (
 type Backend struct {
 	Config     Config
 	ConfigPath string
+	// Notice receives each closed or still open window Windows restored.
+	Notice func(string)
+	mu     sync.Mutex
+	stuck  map[browserID]bool
 }
 
 const (
@@ -37,7 +41,7 @@ type session struct {
 	jobErr   error
 }
 
-func (b Backend) Start(ctx context.Context) (lifecycle.Session, error) {
+func (b *Backend) Start(ctx context.Context) (lifecycle.Session, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
@@ -83,8 +87,12 @@ func (b Backend) Start(ctx context.Context) (lifecycle.Session, error) {
 			case "ready":
 				ready <- nil
 			case "error":
+				e := errors.New(v.Reason)
+				if v.Reason == lifecycle.ErrRestoredOpen.Error() {
+					e = lifecycle.ErrRestoredOpen
+				}
 				select {
-				case ready <- errors.New(v.Reason):
+				case ready <- e:
 				default:
 				}
 			}

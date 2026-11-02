@@ -163,7 +163,7 @@ func app(root string) error {
 	if e = releaseAppConsole(logFile); e != nil {
 		return e
 	}
-	logger := log.New(logFile, "", log.LstdFlags)
+	logger := &controllerLog{Logger: log.New(logFile, "", log.LstdFlags)}
 	logger.Printf("controller %s started", version)
 	var m *lifecycle.Manager
 	var source *partysource.Source
@@ -219,9 +219,10 @@ func app(root string) error {
 			return m.Apply(command)
 		}
 	}
+	trayCommand := logger.command("tray", command)
 	t, e = tray.New(icon(), tray.Options{Name: "Party Visuals", Identifier: "io.tyclab.partyvisuals.controller", Tooltip: "Party Visuals", OnClick: func(c string) {
 		go func() {
-			if e := command(c); e != nil {
+			if e := trayCommand(c); e != nil {
 				t.Notify("Party Visuals", e.Error())
 			}
 		}()
@@ -254,15 +255,21 @@ func app(root string) error {
 	if e != nil {
 		return e
 	}
-	m, e = lifecycle.New(lifecycle.FileStore{Path: filepath.Join(root, "intent.json")}, worker.Backend{Config: c, ConfigPath: filepath.Join(root, "config.json")}, func(s lifecycle.Status) {
+	notice := func(text string) {
+		if logger.restored(text) {
+			t.Notify("Party Visuals", text)
+		}
+	}
+	m, e = startManager(ctx, root, &worker.Backend{Config: c, ConfigPath: filepath.Join(root, "config.json"), Notice: notice}, func(s lifecycle.Status) {
+		logger.state(s)
 		source.SetActive(s.Intent.Mode == "follow-party")
 		refresh(s)
-	})
+	}, 3*time.Second)
 	if e != nil {
 		return e
 	}
 	defer m.Close()
-	server, e := owner.Listen(root, status, command)
+	server, e := owner.Listen(root, status, logger.command("cli", command))
 	if e != nil {
 		return e
 	}
@@ -277,6 +284,7 @@ func app(root string) error {
 		defer tick.Stop()
 		for {
 			d := worker.Diagnose(ctx, c)
+			d.Browser = logger.browserNote()
 			diagMu.Lock()
 			diag = d
 			diagMu.Unlock()
@@ -305,9 +313,89 @@ func app(root string) error {
 	return t.Run()
 }
 
-func diagnosticLines(d worker.Diagnostics, p partysource.Status) []string {
-	return []string{"Screen: " + d.Screen, "Audio: " + d.Audio, "OpenRGB: " + d.OpenRGB, "Follow Party: " + p.Summary}
+// startManager loads the intent and, until ctx ends, closes every sweepEvery
+// the windows Windows restores at sign-in while the controller owns no
+// session, because they appear seconds after the controller starts.
+func startManager(ctx context.Context, root string, backend lifecycle.Backend, changed func(lifecycle.Status), sweepEvery time.Duration) (*lifecycle.Manager, error) {
+	m, e := lifecycle.New(lifecycle.FileStore{Path: filepath.Join(root, "intent.json")}, backend, changed)
+	if e != nil {
+		return nil, e
+	}
+	go func() {
+		tick := time.NewTicker(sweepEvery)
+		defer tick.Stop()
+		for {
+			m.CloseRestored(ctx)
+			select {
+			case <-ctx.Done():
+				return
+			case <-tick.C:
+			}
+		}
+	}()
+	return m, nil
 }
+
+func diagnosticLines(d worker.Diagnostics, p partysource.Status) []string {
+	lines := []string{"Screen: " + d.Screen, "Audio: " + d.Audio, "OpenRGB: " + d.OpenRGB, "Follow Party: " + p.Summary}
+	if d.Browser != "" {
+		lines = append(lines, "Browser: "+d.Browser)
+	}
+	return lines
+}
+
+// controllerLog writes controller.log: tray and CLI commands with their
+// result, state changes, and windows Windows restored at sign-in.
+type controllerLog struct {
+	*log.Logger
+	mu      sync.Mutex
+	last    lifecycle.Status
+	logged  bool
+	browser string
+}
+
+func (l *controllerLog) command(source string, run func(string) error) func(string) error {
+	return func(command string) error {
+		e := run(command)
+		if e != nil {
+			l.Printf("command %q from %s: refused: %v", command, source, e)
+		} else {
+			l.Printf("command %q from %s: accepted", command, source)
+		}
+		return e
+	}
+}
+func (l *controllerLog) state(s lifecycle.Status) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.logged && s.Phase == l.last.Phase && s.Reason == l.last.Reason && s.Intent == l.last.Intent {
+		return
+	}
+	l.logged, l.last = true, s
+	intent := "Manual Off"
+	if s.Intent.Requested && !s.Intent.ManualOff {
+		intent = "Start requested"
+	}
+	line := fmt.Sprintf("phase %s (mode %s, %s)", s.Phase, s.Intent.Mode, intent)
+	if s.Reason != "" {
+		line += ": " + s.Reason
+	}
+	l.Print(line)
+}
+
+// restored records a notice about a window Windows restored at sign-in and
+// reports whether it is new; a window that keeps refusing to close repeats it.
+func (l *controllerLog) restored(text string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if strings.HasPrefix(l.browser, text+" at ") {
+		return false
+	}
+	l.browser = text + " at " + time.Now().Format("15:04")
+	l.Print(text)
+	return true
+}
+func (l *controllerLog) browserNote() string { l.mu.Lock(); defer l.mu.Unlock(); return l.browser }
 
 // openLog opens controller.log in root for appending, first moving a log
 // over 1 MiB to controller.log.1.

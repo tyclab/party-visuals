@@ -19,6 +19,7 @@ type Diagnostics struct {
 	OpenRGB    string    `json:"openrgb"`
 	RGBDevices uint32    `json:"rgbDevices,omitempty"`
 	Outputs    []Output  `json:"outputs,omitempty"`
+	Browser    string    `json:"browser,omitempty"`
 	Time       time.Time `json:"time"`
 }
 type Output struct {

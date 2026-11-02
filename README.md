@@ -2,6 +2,9 @@
 
 For Windows visualizer Start/Stop, persistent Manual Off and tray controls,
 see the [controller installation and lifecycle](controller/README.md).
+Manual Off also holds when Windows reopens the kiosk window at sign-in: the
+controller closes that window and leaves every other Chrome profile alone
+([sign-in restore](controller/README.md#sign-in-restore)).
 
 Local party display controls and browser graphics that keep time with the TycStation
 Lightshow engine ([lightshow](https://github.com/tyclab/lightshow)). A

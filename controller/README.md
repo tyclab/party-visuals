@@ -39,6 +39,12 @@ party-visuals quit
 `diagnostics` prints the phase and the tray's diagnostic lines; `status --json`
 holds everything, the Follow Party source under `followParty`.
 
+`controller.log` in the controller directory records each tray and CLI command
+(the interactive menu sends its commands through the CLI) with its source and
+result, such as `command "start" from tray: accepted`, and each change of phase,
+mode or intent with its reason, such as `phase attention (mode manual, Manual
+Off): …`.
+
 Follow Party is opt-in: select it in the tray or with `mode follow-party`.
 Start enables following, and Stop overrides every later party event.
 Armed/playing state is never inferred to be permission to start local visuals.
@@ -84,6 +90,43 @@ Stale helper status is unknown, never ready. Enable MA's player visualizer
 explicitly through its normal UI; the controller never changes that preference.
 When no usable canvas exists, the updated capture helper preserves normal MA
 artwork/text. Its `--status-file` support is required before a session can run.
+
+## Sign-in restore
+
+Windows can reopen the apps that were open at shutdown or restart when the user
+signs in again ("Automatically save my restartable apps and restart them when I
+sign back in" in Settings > Accounts > Sign-in options, `RestartApps` under
+`HKCU\Software\Microsoft\Windows NT\CurrentVersion\Winlogon`). Chrome takes
+part, so a kiosk window that was open then comes back on the dedicated profile
+a few seconds after sign-in, often after the controller started. Explorer
+starts it outside the controller with the kiosk arguments plus
+`--restore-last-session`.
+
+Nothing the controller or the browser launcher starts carries that flag. When
+the controller starts, on Stop, every 3 s while it owns no session and just
+before each Start, it closes every Chrome browser process in this Windows
+session whose only `--user-data-dir` is the configured `browserProfile` and
+which carries `--restore-last-session`: first through its windows, so Chrome
+keeps the screen it was on, and after 15 s by ending the process, as the
+browser launcher's `-Stop` does. Chrome on any other profile, including the
+normal one, is never touched. Manual Off stays Off, and Start opens the
+controller's own window.
+`controller.log` names each closed window and the tray notifies once for each;
+the diagnostics line shows only the latest, such as `Browser: A browser window
+restored by Windows at sign-in was closed (process N) at HH:MM`. While one stays
+open, Start is refused with "A browser window restored by Windows at sign-in is
+open; close it before Start." A window that could not be ended is not tried
+again until the next Start, and is forgotten once it is gone. The first sweep
+that finds no restored window left returns a Start refused this way to Off. The
+Windows setting is left as it is; turning it off also avoids the brief window
+at sign-in.
+
+Two limits follow from matching the command line. A relative `--user-data-dir`
+is resolved against the controller's working directory, and only the
+`--user-data-dir=` spelling counts. Chrome's own relaunch (after an update or
+`chrome://restart`) also carries `--restore-last-session`, so a dedicated-profile
+window that relaunched itself is closed the same way once the controller owns no
+session, and reported with the sign-in wording.
 
 ## Installation
 
@@ -175,6 +218,10 @@ actual file locks, Job Objects and the PowerShell worker with isolated dummy
 children, plus installer rollback tests. It does not send physical outputs.
 
 Real Chrome GPU recovery, actual sleep/wake and audible source acceptance still
-need controlled deployment checks. Dummy children cannot prove those. Never
+need controlled deployment checks. Dummy children cannot prove those. The same
+holds for a real sign-in restore: CI's dummy `chrome.exe` children only show
+that a dedicated-profile process carrying `--restore-last-session` is closed
+through its window or ended, that other profiles are left running, and that the
+worker names such a window when it refuses Start. Never
 stop production NodeCG to satisfy an uninstall test: its port guard correctly
 refuses removal when the port is occupied.
