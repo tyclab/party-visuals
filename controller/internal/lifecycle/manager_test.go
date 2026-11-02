@@ -565,3 +565,56 @@ func TestARefusedStartReturnsToOffOnceNoRestoredWindowIsLeft(t *testing.T) {
 		}
 	})
 }
+
+// slowSweep is a backend whose close waits like a restored Chrome that
+// ignores WM_CLOSE: until its context ends.
+type slowSweep struct {
+	fakeBackend
+	started chan struct{}
+	calls   chan struct{}
+}
+
+func (b *slowSweep) CloseRestored(ctx context.Context, _ bool) error {
+	b.calls <- struct{}{}
+	close(b.started)
+	<-ctx.Done()
+	return ctx.Err()
+}
+
+func TestCloseEndsASweepInProgress(t *testing.T) {
+	b := &slowSweep{started: make(chan struct{}), calls: make(chan struct{}, 2)}
+	m, e := New(FileStore{filepath.Join(t.TempDir(), "intent.json")}, b, nil)
+	if e != nil {
+		t.Fatal(e)
+	}
+	swept := make(chan struct{})
+	go func() { m.CloseRestored(context.Background()); close(swept) }()
+	<-b.started
+	closed := make(chan error, 1)
+	go func() { closed <- m.Close() }()
+	select {
+	case e = <-closed:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Close waited for a sweep whose caller's context was still live")
+	}
+	<-swept
+	if e != nil || len(b.calls) != 1 {
+		t.Fatalf("Close: %v, %d sweeps", e, len(b.calls))
+	}
+	ended, cancel := context.WithCancel(context.Background())
+	cancel()
+	if m.CloseRestored(ended); len(b.calls) != 1 {
+		t.Fatal("a sweep ran after Close")
+	}
+}
+
+func TestASweepWhoseContextEndedLooksForNothing(t *testing.T) {
+	b := &restoringBackend{restored: 1}
+	m, _ := newManager(t, b)
+	ended, cancel := context.WithCancel(context.Background())
+	cancel()
+	m.CloseRestored(ended)
+	if b.swept() != 0 || b.open() != 1 {
+		t.Fatalf("%d sweeps, %d windows open", b.swept(), b.open())
+	}
+}

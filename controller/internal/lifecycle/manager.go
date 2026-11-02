@@ -61,6 +61,8 @@ type Manager struct {
 	changed func(Status)
 	closed  bool
 	wg      sync.WaitGroup
+	life    context.Context // ends at Close, with any sweep in progress
+	end     context.CancelFunc
 	blocked uint64 // generation whose Start ErrRestoredOpen refused; guarded by run
 }
 
@@ -78,7 +80,8 @@ func New(store Store, backend Backend, changed func(Status)) (*Manager, error) {
 			return nil, err
 		}
 	}
-	return &Manager{store: store, backend: backend, state: Status{Intent: intent, Phase: "off"}, changed: changed}, nil
+	life, end := context.WithCancel(context.Background())
+	return &Manager{store: store, backend: backend, state: Status{Intent: intent, Phase: "off"}, changed: changed, life: life, end: end}, nil
 }
 
 func (m *Manager) Snapshot() Status { m.mu.Lock(); defer m.mu.Unlock(); return m.state }
@@ -170,14 +173,18 @@ func (m *Manager) apply(command, reason string, expectedGeneration uint64) error
 
 // CloseRestored closes windows Windows restored at sign-in while no session is
 // owned. The app calls it only in the first minutes after it started, when
-// Windows restores them; later only the sweep before each Start runs.
+// Windows restores them; later only the sweep before each Start runs. The
+// sweep ends with ctx or Close, also while it waits for a window to close.
 func (m *Manager) CloseRestored(ctx context.Context) {
+	ctx, stop := context.WithCancel(ctx)
+	defer stop()
+	defer context.AfterFunc(m.life, stop)()
 	m.run.Lock()
 	defer m.run.Unlock()
 	m.mu.Lock()
 	closed := m.closed
 	m.mu.Unlock()
-	if closed || m.session != nil {
+	if closed || m.session != nil || ctx.Err() != nil {
 		return
 	}
 	if err := m.closeRestored(ctx, false); err == nil && m.blocked != 0 {
@@ -309,6 +316,7 @@ func (m *Manager) Close() error {
 	if m.cancel != nil {
 		m.cancel()
 	}
+	m.end()
 	m.mu.Unlock()
 	m.run.Lock()
 	err := stop(m.session)
