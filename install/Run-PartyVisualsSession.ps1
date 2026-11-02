@@ -37,7 +37,9 @@ try {
     try { $browserOwned = $browserMutex.WaitOne(0) } catch [Threading.AbandonedMutexException] { $browserOwned = $true }
     if (-not $nodeOwned -or -not $browserOwned) { throw 'A previous launcher still owns visuals; finish controller cutover before Start.' }
     Assert-BrowserConfiguration
-    if ($null -ne (Get-ProfileBrowser)) { throw 'The dedicated browser is already open outside this session; close it before Start.' }
+    $open = Get-ProfileBrowser
+    if ($null -ne $open -and $open.RestoredAtSignIn) { throw 'A browser window restored by Windows at sign-in is open; close it before Start.' }
+    if ($null -ne $open) { throw 'The dedicated browser is already open outside this session; close it before Start.' }
     $controls = [uri]$ControlsUrl
     $listeners = @(Get-NetTCPConnection -LocalPort $controls.Port -State Listen -ErrorAction SilentlyContinue)
     if ($listeners.Count) { throw 'NodeCG port is already in use outside this controller; no second instance was started.' }

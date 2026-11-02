@@ -163,7 +163,7 @@ func app(root string) error {
 	if e = releaseAppConsole(logFile); e != nil {
 		return e
 	}
-	logger := log.New(logFile, "", log.LstdFlags)
+	logger := &controllerLog{Logger: log.New(logFile, "", log.LstdFlags)}
 	logger.Printf("controller %s started", version)
 	var m *lifecycle.Manager
 	var source *partysource.Source
@@ -254,7 +254,12 @@ func app(root string) error {
 	if e != nil {
 		return e
 	}
-	m, e = lifecycle.New(lifecycle.FileStore{Path: filepath.Join(root, "intent.json")}, worker.Backend{Config: c, ConfigPath: filepath.Join(root, "config.json")}, func(s lifecycle.Status) {
+	notice := func(text string) {
+		if logger.restored(text) {
+			t.Notify("Party Visuals", text)
+		}
+	}
+	m, e = lifecycle.New(lifecycle.FileStore{Path: filepath.Join(root, "intent.json")}, worker.Backend{Config: c, ConfigPath: filepath.Join(root, "config.json"), Notice: notice}, func(s lifecycle.Status) {
 		source.SetActive(s.Intent.Mode == "follow-party")
 		refresh(s)
 	})
@@ -277,10 +282,23 @@ func app(root string) error {
 		defer tick.Stop()
 		for {
 			d := worker.Diagnose(ctx, c)
+			d.Browser = logger.browserNote()
 			diagMu.Lock()
 			diag = d
 			diagMu.Unlock()
 			refresh(m.Snapshot())
+			select {
+			case <-ctx.Done():
+				return
+			case <-tick.C:
+			}
+		}
+	}()
+	go func() {
+		tick := time.NewTicker(3 * time.Second)
+		defer tick.Stop()
+		for {
+			m.CloseRestored(ctx)
 			select {
 			case <-ctx.Done():
 				return
@@ -306,8 +324,34 @@ func app(root string) error {
 }
 
 func diagnosticLines(d worker.Diagnostics, p partysource.Status) []string {
-	return []string{"Screen: " + d.Screen, "Audio: " + d.Audio, "OpenRGB: " + d.OpenRGB, "Follow Party: " + p.Summary}
+	lines := []string{"Screen: " + d.Screen, "Audio: " + d.Audio, "OpenRGB: " + d.OpenRGB, "Follow Party: " + p.Summary}
+	if d.Browser != "" {
+		lines = append(lines, "Browser: "+d.Browser)
+	}
+	return lines
 }
+
+// controllerLog writes controller.log, including windows Windows restored at
+// sign-in.
+type controllerLog struct {
+	*log.Logger
+	mu      sync.Mutex
+	browser string
+}
+
+// restored records a notice about a window Windows restored at sign-in and
+// reports whether it is new; a window that keeps refusing to close repeats it.
+func (l *controllerLog) restored(text string) bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if strings.HasPrefix(l.browser, text+" at ") {
+		return false
+	}
+	l.browser = text + " at " + time.Now().Format("15:04")
+	l.Print(text)
+	return true
+}
+func (l *controllerLog) browserNote() string { l.mu.Lock(); defer l.mu.Unlock(); return l.browser }
 
 // openLog opens controller.log in root for appending, first moving a log
 // over 1 MiB to controller.log.1.

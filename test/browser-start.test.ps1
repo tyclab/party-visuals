@@ -143,6 +143,11 @@ $command = 'chrome.exe ' + (($browserArgs | ForEach-Object { ConvertTo-NativeArg
 $owner = [pscustomobject]@{ SessionId = 2147483000; ProcessId = 123; CommandLine = $command }
 $script:processes = @([pscustomobject]@{ SessionId = 2147483000; ProcessId = 456; CommandLine = 'chrome.exe' }, $owner)
 Check 'only matching dedicated Chrome is adopted' ((Get-ProfileBrowser).Id -eq 123)
+Check 'a dedicated window a launcher opened is not taken for one Windows restored' (-not (Get-ProfileBrowser).RestoredAtSignIn)
+$owner.CommandLine = $command + ' --restore-last-session --restart'
+$restored = Get-ProfileBrowser
+Check 'a dedicated window Windows restored at sign-in is named as such' ($restored.Id -eq 123 -and $restored.RestoredAtSignIn)
+$owner.CommandLine = $command
 $owner.CommandLine = $command.Replace(' "--start-fullscreen"', '')
 Check 'a dedicated window started without fullscreen is still adopted' ((Get-ProfileBrowser).Id -eq 123)
 $owner.CommandLine = $command + ' --type=renderer'

@@ -123,7 +123,9 @@ function Get-ProfileBrowser {
         if ($candidateArgs -notcontains '--remote-debugging-port=0' -or $candidateArgs -notcontains '--remote-debugging-address=127.0.0.1' -or $candidateArgs -notcontains ('--app=' + $VisualizerUrl) -or @($captureFlags | Where-Object { $candidateArgs -notcontains $_ }).Count) {
             throw 'The dedicated browser profile is already open with different launch options. Close that profile before starting this task.'
         }
-        Get-Process -Id $candidate.ProcessId -ErrorAction SilentlyContinue
+        # Windows adds --restore-last-session when it restarts Chrome at sign-in; no launcher passes it.
+        $restored = @($candidateArgs | Where-Object { $_ -ieq '--restore-last-session' }).Count -gt 0
+        Get-Process -Id $candidate.ProcessId -ErrorAction SilentlyContinue | Add-Member -NotePropertyName RestoredAtSignIn -NotePropertyValue $restored -PassThru
     })
     if ($found.Count -gt 1) { throw 'Multiple browsers own the dedicated profile; refusing another launch.' }
     if ($found.Count -eq 1) { return $found[0] }

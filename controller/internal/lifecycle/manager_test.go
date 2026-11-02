@@ -62,7 +62,7 @@ func eventually(t *testing.T, f func() bool) {
 		time.Sleep(time.Millisecond)
 	}
 }
-func newManager(t *testing.T, b *fakeBackend) (*Manager, FileStore) {
+func newManager(t *testing.T, b Backend) (*Manager, FileStore) {
 	t.Helper()
 	s := FileStore{filepath.Join(t.TempDir(), "intent.json")}
 	m, e := New(s, b, nil)
@@ -325,4 +325,122 @@ func TestStopOfAnEndedSessionIsNotAnError(t *testing.T) {
 	}
 	m.Apply("start")
 	eventually(t, func() bool { return m.Snapshot().Phase == "running" && b.count() == 2 })
+}
+
+// restoringBackend is a backend on a PC where Windows can restore the kiosk
+// at sign-in: the worker refuses Start while such a window is open, as
+// Run-PartyVisualsSession.ps1 does.
+type restoringBackend struct {
+	fakeBackend
+	sweep    sync.Mutex
+	restored int
+	stuck    bool
+	sweeps   int
+	owned    int
+}
+
+func (b *restoringBackend) Start(ctx context.Context) (Session, error) {
+	if b.open() > 0 {
+		return nil, errors.New("The dedicated browser is already open outside this session; close it before Start.")
+	}
+	return b.fakeBackend.Start(ctx)
+}
+func (b *restoringBackend) CloseRestored(context.Context) error {
+	b.mu.Lock()
+	for _, s := range b.sessions {
+		select {
+		case <-s.stopped:
+		default:
+			b.owned++
+		}
+	}
+	b.mu.Unlock()
+	b.sweep.Lock()
+	defer b.sweep.Unlock()
+	b.sweeps++
+	if b.restored > 0 && b.stuck {
+		return errors.New("A browser window restored by Windows at sign-in is open; close it before Start")
+	}
+	b.restored = 0
+	return nil
+}
+func (b *restoringBackend) restore()  { b.sweep.Lock(); b.restored++; b.sweep.Unlock() }
+func (b *restoringBackend) open() int { b.sweep.Lock(); defer b.sweep.Unlock(); return b.restored }
+func (b *restoringBackend) sweptWhileOwned() int {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.owned
+}
+
+func TestWindowRestoredAtSignInIsClosedAtStartupAndDoesNotBlockStart(t *testing.T) {
+	b := &restoringBackend{restored: 1}
+	m, store := newManager(t, b)
+	m.Apply("restore")
+	eventually(t, func() bool { return m.Snapshot().Phase == "off" && b.open() == 0 })
+	if v, e := store.Load(); e != nil || !v.ManualOff || v.Requested || b.count() != 0 {
+		t.Fatalf("closing the restored window changed Manual Off: %+v %v, %d sessions", v, e, b.count())
+	}
+	m.Apply("start")
+	eventually(t, func() bool { return m.Snapshot().Phase == "running" })
+	if b.count() != 1 || b.sweptWhileOwned() != 0 {
+		t.Fatalf("%d sessions, %d sweeps beside an owned session", b.count(), b.sweptWhileOwned())
+	}
+}
+
+func TestWindowRestoredAfterTheControllerStartedIsClosedWhileOff(t *testing.T) {
+	// The show PC: Windows reopened the kiosk 7 s after the controller started.
+	b := &restoringBackend{}
+	m, store := newManager(t, b)
+	m.Apply("restore")
+	eventually(t, func() bool { return m.Snapshot().Phase == "off" })
+	b.restore()
+	m.CloseRestored(context.Background())
+	if b.open() != 0 {
+		t.Fatal("restored window left open while Manual Off")
+	}
+	if v, _ := store.Load(); !v.ManualOff || b.count() != 0 || m.Snapshot().Phase != "off" {
+		t.Fatalf("sweep changed the state: %+v, phase %s, %d sessions", v, m.Snapshot().Phase, b.count())
+	}
+	m.Apply("start")
+	eventually(t, func() bool { return m.Snapshot().Phase == "running" })
+}
+
+func TestStopClosesAWindowRestoredAtSignIn(t *testing.T) {
+	b := &restoringBackend{}
+	m, _ := newManager(t, b)
+	m.Apply("start")
+	eventually(t, func() bool { return m.Snapshot().Phase == "running" })
+	m.Apply("stop")
+	eventually(t, func() bool { return m.Snapshot().Phase == "off" })
+	b.restore()
+	m.Apply("stop")
+	eventually(t, func() bool { return b.open() == 0 && m.Snapshot().Phase == "off" })
+	if b.sweptWhileOwned() != 0 {
+		t.Fatal("swept while a session was owned")
+	}
+}
+
+func TestNoSweepWhileASessionIsOwned(t *testing.T) {
+	b := &restoringBackend{}
+	m, _ := newManager(t, b)
+	m.Apply("start")
+	eventually(t, func() bool { return m.Snapshot().Phase == "running" })
+	before := func() int { b.sweep.Lock(); defer b.sweep.Unlock(); return b.sweeps }()
+	b.restore()
+	m.CloseRestored(context.Background())
+	if after := func() int { b.sweep.Lock(); defer b.sweep.Unlock(); return b.sweeps }(); after != before || b.open() != 1 {
+		t.Fatalf("swept beside an owned session: sweeps %d -> %d", before, after)
+	}
+}
+
+func TestARestoredWindowThatStaysOpenIsNamedWhenStartIsRefused(t *testing.T) {
+	b := &restoringBackend{restored: 1, stuck: true}
+	m, _ := newManager(t, b)
+	m.Apply("restore")
+	eventually(t, func() bool { return m.Snapshot().Phase == "off" })
+	m.Apply("start")
+	eventually(t, func() bool { return m.Snapshot().Phase == "attention" })
+	if r := m.Snapshot().Reason; !strings.Contains(r, "restored by Windows at sign-in is open") || b.count() != 0 {
+		t.Fatalf("reason %q, %d sessions", r, b.count())
+	}
 }

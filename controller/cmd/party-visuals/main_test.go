@@ -114,3 +114,42 @@ func TestPartyLinesLandInControllerLog(t *testing.T) {
 		t.Fatalf("fresh log: %v", e)
 	}
 }
+
+func readLog(t *testing.T, root string) string {
+	t.Helper()
+	b, e := os.ReadFile(filepath.Join(root, "controller.log"))
+	if e != nil {
+		t.Fatal(e)
+	}
+	return string(b)
+}
+
+func TestRestoredWindowNoticesLandInControllerLogAndDiagnostics(t *testing.T) {
+	root := t.TempDir()
+	f, e := openLog(root)
+	if e != nil {
+		t.Fatal(e)
+	}
+	l := &controllerLog{Logger: log.New(f, "", log.LstdFlags)}
+	if lines := diagnosticLines(worker.Diagnostics{Browser: l.browserNote()}, partysource.Status{}); strings.HasPrefix(lines[len(lines)-1], "Browser:") {
+		t.Fatal("a Browser line without a restored window")
+	}
+	open := worker.RestoredOpen + " (process 41: access denied)"
+	if !l.restored(open) || l.restored(open) {
+		t.Fatal("a repeated notice was not recognised")
+	}
+	if !l.restored(worker.RestoredClosed + " (process 42)") {
+		t.Fatal("a new notice was taken for a repeat")
+	}
+	f.Close()
+	b := readLog(t, root)
+	for _, want := range []string{open + "\n", "A browser window restored by Windows at sign-in was closed (process 42)\n"} {
+		if strings.Count(b, want) != 1 {
+			t.Errorf("controller.log lacks one %q:\n%s", want, b)
+		}
+	}
+	lines := diagnosticLines(worker.Diagnostics{Browser: l.browserNote()}, partysource.Status{})
+	if last := lines[len(lines)-1]; !strings.HasPrefix(last, "Browser: A browser window restored by Windows at sign-in was closed (process 42) at ") {
+		t.Fatalf("diagnostics end with %q", last)
+	}
+}

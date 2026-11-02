@@ -9,6 +9,12 @@ import (
 
 func main() {
 	for _, a := range os.Args[1:] {
+		if a == "--test-window" {
+			window()
+			return
+		}
+	}
+	for _, a := range os.Args[1:] {
 		if strings.HasPrefix(a, "--user-data-dir=") {
 			for {
 				time.Sleep(time.Second)

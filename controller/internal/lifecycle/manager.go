@@ -31,6 +31,13 @@ type Session interface {
 type Backend interface {
 	Start(context.Context) (Session, error)
 }
+
+// Sweeper is a Backend that can close dedicated-browser windows Windows
+// restored at sign-in. The controller starts none of them, so the manager
+// calls it only while it owns no session.
+type Sweeper interface {
+	CloseRestored(context.Context) error
+}
 type Store interface {
 	Load() (Intent, error)
 	Save(Intent) error
@@ -122,7 +129,7 @@ func (m *Manager) apply(command, reason string, expectedGeneration uint64) error
 		}
 	}
 	next.Reason = reason
-	if next == m.state && command != "restore" && !(command == "start" && m.state.Phase == "attention") {
+	if next == m.state && command != "restore" && command != "stop" && !(command == "start" && m.state.Phase == "attention") {
 		m.mu.Unlock()
 		return nil
 	}
@@ -151,6 +158,25 @@ func (m *Manager) apply(command, reason string, expectedGeneration uint64) error
 	m.mu.Unlock()
 	m.notify(s)
 	return persistenceError
+}
+
+// CloseRestored closes windows Windows restored at sign-in while no session is
+// owned, also those that appear after the controller started.
+func (m *Manager) CloseRestored(ctx context.Context) {
+	m.run.Lock()
+	defer m.run.Unlock()
+	m.mu.Lock()
+	closed := m.closed
+	m.mu.Unlock()
+	if !closed {
+		_ = m.closeRestored(ctx)
+	}
+}
+func (m *Manager) closeRestored(ctx context.Context) error {
+	if s, ok := m.backend.(Sweeper); ok && m.session == nil {
+		return s.CloseRestored(ctx)
+	}
+	return nil
 }
 
 func (m *Manager) current(gen uint64) bool {
@@ -205,6 +231,7 @@ func (m *Manager) reconcile(ctx context.Context, gen uint64, want bool) {
 		return
 	}
 	if !want {
+		_ = m.closeRestored(ctx)
 		s := m.Snapshot()
 		phase := "off"
 		if s.Suspended {
@@ -216,6 +243,12 @@ func (m *Manager) reconcile(ctx context.Context, gen uint64, want bool) {
 			phase = "attention"
 		}
 		m.publish(gen, phase, s.Reason)
+		return
+	}
+	if err := m.closeRestored(ctx); err != nil {
+		if ctx.Err() == nil {
+			m.publish(gen, "attention", err.Error())
+		}
 		return
 	}
 	session, err := m.backend.Start(ctx)

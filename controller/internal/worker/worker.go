@@ -17,6 +17,8 @@ import (
 type Backend struct {
 	Config     Config
 	ConfigPath string
+	// Notice receives each closed or still open window Windows restored.
+	Notice func(string)
 }
 
 const (
