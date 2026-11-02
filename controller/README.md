@@ -189,7 +189,28 @@ for example to add the Home Assistant keys, edit a copy of
 ### From a checkout
 
 Build from this directory with `go build -trimpath -o party-visuals.exe
-./cmd/party-visuals`, or use the reviewed Windows CI artifact. In PowerShell 5.1:
+./cmd/party-visuals`, or use the reviewed Windows CI artifact. CI builds also
+carry a Windows version resource (company `tyclab`, description `Party Visuals
+controller`, file and product version from the tag, `0.0.0-dev` for untagged
+builds) and an application manifest: `asInvoker`, so it never asks for
+elevation, per-monitor DPI aware, as the tray sets itself at run time, and
+Windows 10 and 11 as supported systems. CI generates both into
+`cmd/party-visuals/resource_windows_amd64.syso` from
+`cmd/party-visuals/resource/` with goversioninfo, pinned as a tool in `go.mod`,
+so no binary resource is committed. For the same locally, run this before
+`go build`:
+
+```
+go tool goversioninfo -64 -o cmd/party-visuals/resource_windows_amd64.syso -manifest cmd/party-visuals/resource/party-visuals.exe.manifest -propagate-ver-strings -file-version 0.0.0-dev -product-version 0.0.0-dev cmd/party-visuals/resource/versioninfo.json
+```
+
+The executable stays a console program, not a `-H windowsgui` one, because the
+same file is the CLI and `status`, `start`, `stop`, `quit` and the others print
+to the console. Only `app` detaches: it writes its output to `controller.log`
+and, when it is the only process on its console, as under the login task,
+frees that console (FreeConsole).
+
+In PowerShell 5.1:
 
 ```powershell
 ./Install-PartyVisualsController.ps1 -Action Stage `

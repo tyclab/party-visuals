@@ -7,3 +7,6 @@ logs/
 
 # Never commit access tokens.
 *.token
+
+# Windows resources are generated at build time (controller/README.md).
+*.syso
