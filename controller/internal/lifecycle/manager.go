@@ -34,8 +34,9 @@ type Backend interface {
 
 // Sweeper is a Backend that can close dedicated-browser windows Windows
 // restored at sign-in. The controller starts none of them, so the manager
-// calls it only while it owns no session; start retries windows that could
-// not be ended before.
+// calls it only while it owns no session: right before each Start, where
+// start retries windows that could not be ended before, and from
+// CloseRestored. No other state change sweeps.
 type Sweeper interface {
 	CloseRestored(ctx context.Context, start bool) error
 }
@@ -60,8 +61,6 @@ type Manager struct {
 	changed func(Status)
 	closed  bool
 	wg      sync.WaitGroup
-	life    context.Context
-	end     context.CancelFunc
 	blocked uint64 // generation whose Start ErrRestoredOpen refused; guarded by run
 }
 
@@ -79,8 +78,7 @@ func New(store Store, backend Backend, changed func(Status)) (*Manager, error) {
 			return nil, err
 		}
 	}
-	life, end := context.WithCancel(context.Background())
-	return &Manager{store: store, backend: backend, state: Status{Intent: intent, Phase: "off"}, changed: changed, life: life, end: end}, nil
+	return &Manager{store: store, backend: backend, state: Status{Intent: intent, Phase: "off"}, changed: changed}, nil
 }
 
 func (m *Manager) Snapshot() Status { m.mu.Lock(); defer m.mu.Unlock(); return m.state }
@@ -139,13 +137,6 @@ func (m *Manager) apply(command, reason string, expectedGeneration uint64) error
 		}
 	}
 	next.Reason = reason
-	if next == m.state && command == "stop" {
-		// Already Off: Stop still closes a window Windows restored, and publishes nothing.
-		m.wg.Add(1)
-		go func() { defer m.wg.Done(); m.CloseRestored(m.life) }()
-		m.mu.Unlock()
-		return nil
-	}
 	if next == m.state && command != "restore" && !(command == "start" && m.state.Phase == "attention") {
 		m.mu.Unlock()
 		return nil
@@ -178,7 +169,8 @@ func (m *Manager) apply(command, reason string, expectedGeneration uint64) error
 }
 
 // CloseRestored closes windows Windows restored at sign-in while no session is
-// owned, also those that appear after the controller started.
+// owned. The app calls it only in the first minutes after it started, when
+// Windows restores them; later only the sweep before each Start runs.
 func (m *Manager) CloseRestored(ctx context.Context) {
 	m.run.Lock()
 	defer m.run.Unlock()
@@ -262,7 +254,6 @@ func (m *Manager) reconcile(ctx context.Context, gen uint64, want bool) {
 		return
 	}
 	if !want {
-		_ = m.closeRestored(ctx, false)
 		s := m.Snapshot()
 		phase := "off"
 		if s.Suspended {
@@ -318,7 +309,6 @@ func (m *Manager) Close() error {
 	if m.cancel != nil {
 		m.cancel()
 	}
-	m.end()
 	m.mu.Unlock()
 	m.run.Lock()
 	err := stop(m.session)

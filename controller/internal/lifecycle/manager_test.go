@@ -390,13 +390,18 @@ func (b *restoringBackend) sweptWhileOwned() int {
 	return b.owned
 }
 
-func TestWindowRestoredAtSignInIsClosedAtStartupAndDoesNotBlockStart(t *testing.T) {
+func TestWindowRestoredAtSignInIsClosedByTheSweepAndDoesNotBlockStart(t *testing.T) {
 	b := &restoringBackend{restored: 1}
 	m, store := newManager(t, b)
 	m.Apply("restore")
-	eventually(t, func() bool { return m.Snapshot().Phase == "off" && b.open() == 0 })
-	if v, e := store.Load(); e != nil || !v.ManualOff || v.Requested || b.count() != 0 {
-		t.Fatalf("closing the restored window changed Manual Off: %+v %v, %d sessions", v, e, b.count())
+	eventually(t, func() bool { return m.Snapshot().Phase == "off" })
+	if b.swept() != 0 {
+		t.Fatalf("restoring the intent swept %d times", b.swept())
+	}
+	// The app's sweep in its first minutes after sign-in.
+	m.CloseRestored(context.Background())
+	if v, e := store.Load(); e != nil || !v.ManualOff || v.Requested || b.count() != 0 || b.open() != 0 {
+		t.Fatalf("closing the restored window changed Manual Off: %+v %v, %d sessions, %d open", v, e, b.count(), b.open())
 	}
 	m.Apply("start")
 	eventually(t, func() bool { return m.Snapshot().Phase == "running" })
@@ -428,18 +433,33 @@ func TestWindowRestoredAfterTheControllerStartedIsClosedWhileOff(t *testing.T) {
 	eventually(t, func() bool { return m.Snapshot().Phase == "running" })
 }
 
-func TestStopClosesAWindowRestoredAtSignIn(t *testing.T) {
+func TestNoStateChangeButStartSweeps(t *testing.T) {
 	b := &restoringBackend{}
 	m, _ := newManager(t, b)
+	settled := func() bool { p := m.Snapshot().Phase; return p != "starting" && p != "stopping" }
+	m.Apply("restore")
+	eventually(t, settled)
 	m.Apply("start")
 	eventually(t, func() bool { return m.Snapshot().Phase == "running" })
 	m.Apply("stop")
-	eventually(t, func() bool { return m.Snapshot().Phase == "off" })
+	eventually(t, settled)
 	b.restore()
-	m.Apply("stop")
-	eventually(t, func() bool { return b.open() == 0 && m.Snapshot().Phase == "off" })
-	if b.sweptWhileOwned() != 0 {
-		t.Fatal("swept while a session was owned")
+	for _, c := range []string{"stop", "suspend", "resume", "follow-party", "party-on", "party-off", "manual", "stop"} {
+		if e := m.Apply(c); e != nil {
+			t.Fatalf("%s: %v", c, e)
+		}
+		eventually(t, settled)
+	}
+	if b.swept() != 1 || b.open() != 1 {
+		t.Fatalf("%d sweeps, %d windows open; only the Start may have swept", b.swept(), b.open())
+	}
+	m.Apply("start")
+	eventually(t, func() bool { return m.Snapshot().Phase == "running" && b.open() == 0 })
+	b.sweep.Lock()
+	starts := append([]bool{}, b.starts...)
+	b.sweep.Unlock()
+	if len(starts) != 2 || !starts[0] || !starts[1] || b.sweptWhileOwned() != 0 {
+		t.Fatalf("sweeps %v, %d beside an owned session", starts, b.sweptWhileOwned())
 	}
 }
 
@@ -480,7 +500,7 @@ func (l *phaseLog) get() []string {
 	return append([]string{}, l.phases...)
 }
 
-func TestStopWhileOffSweepsWithoutPublishing(t *testing.T) {
+func TestStopWhileOffPublishesAndSweepsNothing(t *testing.T) {
 	b, l := &restoringBackend{}, &phaseLog{}
 	m, e := New(FileStore{filepath.Join(t.TempDir(), "intent.json")}, b, l.record)
 	if e != nil {
@@ -489,16 +509,15 @@ func TestStopWhileOffSweepsWithoutPublishing(t *testing.T) {
 	m.Apply("restore")
 	// Restore publishes stopping and off, in either order.
 	eventually(t, func() bool { return len(l.get()) == 2 && m.Snapshot().Phase == "off" })
-	before, generation, sweeps := l.get(), m.Snapshot().Generation, b.swept()
+	before, generation := l.get(), m.Snapshot().Generation
+	b.restore()
 	for i := 0; i < 3; i++ {
-		b.restore()
 		if e = m.Apply("stop"); e != nil {
 			t.Fatal(e)
 		}
-		eventually(t, func() bool { return b.open() == 0 })
 	}
-	if after := l.get(); len(after) != len(before) || m.Snapshot().Generation != generation || b.swept() != sweeps+3 {
-		t.Fatalf("Stops while Off: phases %v -> %v, generation %d -> %d, sweeps %d -> %d", before, after, generation, m.Snapshot().Generation, sweeps, b.swept())
+	if after := l.get(); len(after) != len(before) || m.Snapshot().Generation != generation || b.swept() != 0 || b.open() != 1 {
+		t.Fatalf("Stops while Off: phases %v -> %v, generation %d -> %d, %d sweeps", before, after, generation, m.Snapshot().Generation, b.swept())
 	}
 	if e = m.Close(); e != nil {
 		t.Fatal(e)

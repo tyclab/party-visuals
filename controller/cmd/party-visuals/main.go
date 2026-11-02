@@ -23,6 +23,13 @@ import (
 
 var version = "dev"
 
+// Windows restores apps seconds after sign-in, when the login task starts the
+// controller, so the restored-window sweep runs on its own only that long.
+const (
+	signInSweep      = 10 * time.Minute
+	signInSweepEvery = 3 * time.Second
+)
+
 type statusView struct {
 	Version     string             `json:"version"`
 	State       lifecycle.Status   `json:"state"`
@@ -264,7 +271,7 @@ func app(root string) error {
 		logger.state(s)
 		source.SetActive(s.Intent.Mode == "follow-party")
 		refresh(s)
-	}, 3*time.Second)
+	}, signInSweepEvery, signInSweep)
 	if e != nil {
 		return e
 	}
@@ -313,21 +320,25 @@ func app(root string) error {
 	return t.Run()
 }
 
-// startManager loads the intent and, until ctx ends, closes every sweepEvery
-// the windows Windows restores at sign-in while the controller owns no
-// session, because they appear seconds after the controller starts.
-func startManager(ctx context.Context, root string, backend lifecycle.Backend, changed func(lifecycle.Status), sweepEvery time.Duration) (*lifecycle.Manager, error) {
+// startManager loads the intent and, for sweepFor or until ctx ends, closes
+// every sweepEvery the windows Windows restores at sign-in while the
+// controller owns no session, because they appear seconds after it starts.
+// After that only the sweep before each Start looks for them.
+func startManager(ctx context.Context, root string, backend lifecycle.Backend, changed func(lifecycle.Status), sweepEvery, sweepFor time.Duration) (*lifecycle.Manager, error) {
 	m, e := lifecycle.New(lifecycle.FileStore{Path: filepath.Join(root, "intent.json")}, backend, changed)
 	if e != nil {
 		return nil, e
 	}
 	go func() {
-		tick := time.NewTicker(sweepEvery)
+		tick, window := time.NewTicker(sweepEvery), time.NewTimer(sweepFor)
 		defer tick.Stop()
+		defer window.Stop()
 		for {
 			m.CloseRestored(ctx)
 			select {
 			case <-ctx.Done():
+				return
+			case <-window.C:
 				return
 			case <-tick.C:
 			}

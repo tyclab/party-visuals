@@ -249,26 +249,34 @@ func TestCommandsAndStatesLandInControllerLog(t *testing.T) {
 
 // restoredWindows is a backend on which Windows restores the kiosk at any time.
 type restoredWindows struct {
-	mu   sync.Mutex
-	open int
+	mu     sync.Mutex
+	open   int
+	sweeps []bool
 }
 
 func (r *restoredWindows) Start(context.Context) (lifecycle.Session, error) {
 	return nil, errors.New("no worker in this test")
 }
-func (r *restoredWindows) CloseRestored(context.Context, bool) error {
+func (r *restoredWindows) CloseRestored(_ context.Context, start bool) error {
 	r.mu.Lock()
 	r.open = 0
+	r.sweeps = append(r.sweeps, start)
 	r.mu.Unlock()
 	return nil
 }
 func (r *restoredWindows) windows() int { r.mu.Lock(); defer r.mu.Unlock(); return r.open }
+func (r *restoredWindows) swept() []bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]bool{}, r.sweeps...)
+}
+func (r *restoredWindows) restore() { r.mu.Lock(); r.open = 1; r.mu.Unlock() }
 
 func TestAWindowRestoredAfterStartupIsClosedWithoutACommand(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	b := &restoredWindows{}
-	m, e := startManager(ctx, t.TempDir(), b, nil, 10*time.Millisecond)
+	m, e := startManager(ctx, t.TempDir(), b, nil, 10*time.Millisecond, time.Minute)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -279,9 +287,7 @@ func TestAWindowRestoredAfterStartupIsClosedWithoutACommand(t *testing.T) {
 			t.Fatal("restore did not settle")
 		}
 	}
-	b.mu.Lock()
-	b.open = 1 // as on the show PC, 7 s after the controller started
-	b.mu.Unlock()
+	b.restore() // as on the show PC, 7 s after the controller started
 	for end := time.Now().Add(3 * time.Second); b.windows() != 0; time.Sleep(time.Millisecond) {
 		if time.Now().After(end) {
 			t.Fatal("no sweep closed the window restored after startup")
@@ -289,5 +295,50 @@ func TestAWindowRestoredAfterStartupIsClosedWithoutACommand(t *testing.T) {
 	}
 	if s := m.Snapshot(); s.Phase != "off" || !s.Intent.ManualOff {
 		t.Fatalf("the sweep changed the state: %+v", s)
+	}
+}
+
+func TestAfterTheSignInWindowOnlyStartSweeps(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	b := &restoredWindows{}
+	m, e := startManager(ctx, t.TempDir(), b, nil, 10*time.Millisecond, 100*time.Millisecond)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer m.Close()
+	m.Apply("restore")
+	for end := time.Now().Add(3 * time.Second); len(b.swept()) < 2; time.Sleep(time.Millisecond) {
+		if time.Now().After(end) {
+			t.Fatal("no sweep every 10 ms in the sign-in window")
+		}
+	}
+	// The window ends after 100 ms; wait until no sweep came for 100 ms.
+	end := time.Now().Add(3 * time.Second)
+	for n, quiet := len(b.swept()), time.Now(); time.Since(quiet) < 100*time.Millisecond; time.Sleep(5 * time.Millisecond) {
+		if len(b.swept()) != n {
+			n, quiet = len(b.swept()), time.Now()
+		}
+		if time.Now().After(end) {
+			t.Fatal("sweeps went on 3 s past the 100 ms sign-in window")
+		}
+	}
+	before := len(b.swept())
+	b.restore()
+	m.Apply("stop")
+	m.Apply("follow-party")
+	time.Sleep(100 * time.Millisecond)
+	if b.windows() != 1 || len(b.swept()) != before {
+		t.Fatalf("after the sign-in window: %d windows open, sweeps %d -> %d", b.windows(), before, len(b.swept()))
+	}
+	m.Apply("manual")
+	m.Apply("start")
+	for end := time.Now().Add(3 * time.Second); b.windows() != 0; time.Sleep(time.Millisecond) {
+		if time.Now().After(end) {
+			t.Fatal("Start did not sweep first")
+		}
+	}
+	if s := b.swept(); len(s) != before+1 || !s[before] {
+		t.Fatalf("sweeps %v, want one more, before Start", s[before:])
 	}
 }

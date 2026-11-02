@@ -108,11 +108,14 @@ a few seconds after sign-in, often after the controller started. Explorer
 starts it outside the controller with the kiosk arguments plus
 `--restore-last-session`.
 
-Nothing the controller or the browser launcher starts carries that flag. When
-the controller starts, on Stop, every 3 s while it owns no session and just
-before each Start, it closes every Chrome browser process in this Windows
-session whose only `--user-data-dir` is the configured `browserProfile` and
-which carries `--restore-last-session`: first through its windows, so Chrome
+Nothing the controller or the browser launcher starts carries that flag. For
+the first 10 minutes after the controller starts (the login task starts it at
+sign-in), every 3 s while it owns no session, and once just before each Start,
+it closes every Chrome browser process in this Windows session whose only
+`--user-data-dir` is the configured `browserProfile` and which carries
+`--restore-last-session`. Outside those sweeps the controller does not list
+processes or read their command lines; Stop, sleep and the other commands do
+not sweep. It closes such a browser first through its windows, so Chrome
 keeps the screen it was on, and after 15 s by ending the process, as the
 browser launcher's `-Stop` does. Chrome on any other profile, including the
 normal one, is never touched. Manual Off stays Off, and Start opens the
@@ -122,17 +125,18 @@ the diagnostics line shows only the latest, such as `Browser: A browser window
 restored by Windows at sign-in was closed (process N) at HH:MM`. While one stays
 open, Start is refused with "A browser window restored by Windows at sign-in is
 open; close it before Start." A window that could not be ended is not tried
-again until the next Start, and is forgotten once it is gone. The first sweep
-that finds no restored window left returns a Start refused this way to Off. The
-Windows setting is left as it is; turning it off also avoids the brief window
-at sign-in.
+again until the next Start, and is forgotten once it is gone. Within the first
+10 minutes, the first sweep that finds no restored window left returns a Start
+refused this way to Off; later the refusal stays until the next Start, which
+sweeps again, or Stop. The Windows setting is left as it is; turning it off
+also avoids the brief window at sign-in.
 
 Two limits follow from matching the command line. A relative `--user-data-dir`
 is resolved against the controller's working directory, and only the
 `--user-data-dir=` spelling counts. Chrome's own relaunch (after an update or
 `chrome://restart`) also carries `--restore-last-session`, so a dedicated-profile
-window that relaunched itself is closed the same way once the controller owns no
-session, and reported with the sign-in wording.
+window that relaunched itself is closed the same way by the next sweep while the
+controller owns no session, and reported with the sign-in wording.
 
 ## Installation
 
