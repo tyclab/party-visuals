@@ -41,7 +41,7 @@ holds everything, the Follow Party source under `followParty`.
 
 `controller.log` in the controller directory records each tray and CLI command
 (the interactive menu sends its commands through the CLI) with its source and
-result, such as `command start from tray: accepted`, and each change of phase,
+result, such as `command "start" from tray: accepted`, and each change of phase,
 mode or intent with its reason, such as `phase attention (mode manual, Manual
 Off): …`.
 
@@ -108,14 +108,25 @@ before each Start, it closes every Chrome browser process in this Windows
 session whose only `--user-data-dir` is the configured `browserProfile` and
 which carries `--restore-last-session`: first through its windows, so Chrome
 keeps the screen it was on, and after 15 s by ending the process, as the
-browser launcher's `-Stop` does. Chrome on any other profile, including the normal one, is never
-touched. Manual Off stays Off, and Start opens the controller's own window.
-`controller.log`, a tray notification and the diagnostics line `Browser: A
-browser window restored by Windows at sign-in was closed (process N) at HH:MM`
-name each closed window. If one stays open, Start is refused with "A browser
-window restored by Windows at sign-in is open; close it before Start." The
+browser launcher's `-Stop` does. Chrome on any other profile, including the
+normal one, is never touched. Manual Off stays Off, and Start opens the
+controller's own window.
+`controller.log` names each closed window and the tray notifies once for each;
+the diagnostics line shows only the latest, such as `Browser: A browser window
+restored by Windows at sign-in was closed (process N) at HH:MM`. While one stays
+open, Start is refused with "A browser window restored by Windows at sign-in is
+open; close it before Start." A window that could not be ended is not tried
+again until the next Start, and is forgotten once it is gone. The first sweep
+that finds no restored window left returns a Start refused this way to Off. The
 Windows setting is left as it is; turning it off also avoids the brief window
 at sign-in.
+
+Two limits follow from matching the command line. A relative `--user-data-dir`
+is resolved against the controller's working directory, and only the
+`--user-data-dir=` spelling counts. Chrome's own relaunch (after an update or
+`chrome://restart`) also carries `--restore-last-session`, so a dedicated-profile
+window that relaunched itself is closed the same way once the controller owns no
+session, and reported with the sign-in wording.
 
 ## Installation
 
