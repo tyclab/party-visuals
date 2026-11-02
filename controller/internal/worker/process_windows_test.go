@@ -8,10 +8,30 @@ import (
 	"golang.org/x/sys/windows"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
+
+func TestPowerShellIsTheSystemCopyWhateverSystemRootSays(t *testing.T) {
+	t.Setenv("SystemRoot", t.TempDir())
+	shell, e := powerShell()
+	if e != nil {
+		t.Fatal(e)
+	}
+	system, e := windows.GetSystemDirectory()
+	if e != nil {
+		t.Fatal(e)
+	}
+	if want := filepath.Join(system, "WindowsPowerShell", "v1.0", "powershell.exe"); !strings.EqualFold(shell, want) {
+		t.Fatalf("powershell.exe is %q, want %q", shell, want)
+	}
+	if _, e = os.Stat(shell); e != nil {
+		t.Fatal(e)
+	}
+}
 
 func TestOwnedJobEndsOnlyItsChildren(t *testing.T) {
 	if os.Getenv("PARTY_JOB_TEST") == "child" {

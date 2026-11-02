@@ -45,7 +45,11 @@ func (b *Backend) Start(ctx context.Context) (lifecycle.Session, error) {
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	cmd := exec.Command(powerShell(), "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", b.Config.WorkerScript, "-ConfigPath", b.ConfigPath)
+	shell, e := powerShell()
+	if e != nil {
+		return nil, e
+	}
+	cmd := exec.Command(shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", b.Config.WorkerScript, "-ConfigPath", b.ConfigPath)
 	hide(cmd)
 	in, e := cmd.StdinPipe()
 	if e != nil {

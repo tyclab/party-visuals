@@ -66,13 +66,17 @@ func New(c Config, command func(string) error, logf func(string, ...any)) *Sourc
 
 // ReadToken returns the one token in path. Home Assistant counts an empty or
 // malformed bearer as a failed login and may ban the address, so those are
-// errors here and never become a request.
+// errors here and never become a request. A file other accounts can open is
+// refused before it is read.
 func ReadToken(path string) (string, error) {
 	f, e := os.Open(path)
 	if e != nil {
 		return "", fmt.Errorf("Home Assistant token file unreadable: %w", e)
 	}
 	defer f.Close()
+	if e = checkTokenACL(path); e != nil {
+		return "", e
+	}
 	b, e := io.ReadAll(io.LimitReader(f, 4097))
 	if e != nil {
 		return "", e

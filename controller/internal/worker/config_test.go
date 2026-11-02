@@ -23,7 +23,47 @@ func writeConfig(t *testing.T, extra map[string]any) string {
 	b, _ := json.Marshal(v)
 	p := filepath.Join(dir, "config.json")
 	os.WriteFile(p, b, 0600)
+	runFrom(t, dir)
 	return p
+}
+
+// runFrom makes dir the release folder, as if party-visuals.exe ran from it.
+func runFrom(t *testing.T, dir string) {
+	saved := executable
+	executable = func() (string, error) { return filepath.Join(dir, "party-visuals.exe"), nil }
+	t.Cleanup(func() { executable = saved })
+}
+
+func TestWorkerScriptMustBeInTheExecutablesFolder(t *testing.T) {
+	root := t.TempDir()
+	release := filepath.Join(root, "release")
+	os.MkdirAll(filepath.Join(release, "scripts"), 0700)
+	const name = "Run-PartyVisualsSession.ps1"
+	for _, dir := range []string{root, release, filepath.Join(release, "scripts")} {
+		os.WriteFile(filepath.Join(dir, name), nil, 0600)
+	}
+	load := func(script string) error {
+		p := writeConfig(t, map[string]any{"workerScript": script})
+		runFrom(t, release)
+		_, e := Load(p)
+		return e
+	}
+	sep := string(filepath.Separator)
+	for what, script := range map[string]string{
+		"the folder above":       filepath.Join(root, name),
+		"a path that climbs out": release + sep + ".." + sep + name,
+		"a subfolder":            filepath.Join(release, "scripts", name),
+	} {
+		if e := load(script); e == nil || !strings.Contains(e.Error(), "workerScript must be in the folder that holds this executable") {
+			t.Errorf("%s: %v", what, e)
+		}
+	}
+	if e := load(filepath.Join(release, name)); e != nil {
+		t.Errorf("the script beside the executable: %v", e)
+	}
+	if e := load(name); e == nil || e.Error() != "workerScript must be absolute" {
+		t.Errorf("a relative workerScript: %v", e)
+	}
 }
 
 func TestConfigWithoutHomeAssistantLeavesFollowPartyUnconfigured(t *testing.T) {
@@ -76,5 +116,49 @@ func TestHomeAssistantSourceIsValidated(t *testing.T) {
 		} else if strings.Contains(e.Error(), "secret") {
 			t.Errorf("%s: error repeats a credential: %v", name, e)
 		}
+	}
+}
+
+func TestBrowserProfileMustNotBeABrowsersOwnProfileFolder(t *testing.T) {
+	local := t.TempDir()
+	t.Setenv("LOCALAPPDATA", local)
+	sep := string(filepath.Separator)
+	refused := func(profile string) bool {
+		_, e := Load(writeConfig(t, map[string]any{"browserProfile": profile}))
+		return e != nil && strings.Contains(e.Error(), "not a browser's own profile folder")
+	}
+	chrome := filepath.Join(local, "Google", "Chrome", "User Data")
+	for _, profile := range []string{
+		chrome,
+		strings.ToUpper(chrome) + sep + sep,
+		filepath.Join(local, "Google", "Chrome Beta", "User Data"),
+		filepath.Join(local, "Chromium", "User Data"),
+		filepath.Join(local, "Microsoft", "Edge", "User Data"),
+	} {
+		if !refused(profile) {
+			t.Errorf("browserProfile %q accepted", profile)
+		}
+	}
+	for _, profile := range []string{
+		filepath.Join(local, "PartyVisuals", "browser-profile"),
+		filepath.Join(chrome, "Default"),
+		filepath.Join(local, "Google", "Chrome"),
+		filepath.Join(t.TempDir(), "User Data"),
+	} {
+		if refused(profile) {
+			t.Errorf("browserProfile %q refused", profile)
+		}
+	}
+	os.MkdirAll(chrome, 0700)
+	link := filepath.Join(t.TempDir(), "local")
+	if e := os.Symlink(local, link); e != nil {
+		t.Skipf("no symbolic links here: %v", e)
+	}
+	if !refused(filepath.Join(link, "Google", "Chrome", "User Data")) {
+		t.Error("the default root spelt through a link to LOCALAPPDATA was accepted")
+	}
+	t.Setenv("LOCALAPPDATA", link)
+	if !refused(chrome) {
+		t.Error("the default root was accepted while LOCALAPPDATA names it through a link")
 	}
 }

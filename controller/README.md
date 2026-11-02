@@ -79,10 +79,20 @@ The URL must be https. The token file holds one Home Assistant long-lived
 access token (profile, Security tab) and nothing else; a UTF-8 byte-order mark
 and surrounding whitespace are ignored. Keep it in the controller directory,
 which only the user and SYSTEM can read, never in `config.json` or this
-repository. The last three keys default to the values shown; `partyPollMs`
-takes 1000 to 60000. `check`, and with it Stage, refuses an http URL, a
-relative token path, an unreadable or empty token file and a malformed entity
-id.
+repository. Before reading the file the controller reads its permissions (DACL)
+and refuses the token if any entry grants access to an account other than this
+Windows user, SYSTEM or Administrators: `controller.log` gets one line naming
+the file and that account, and Follow Party reads `not polling: … also grants
+access to <account>`. Deny entries grant nothing and do not count; a file
+without a DACL counts as open to Everyone. A conditional entry (an allow entry
+with a condition, such as group membership) for another account is refused too,
+as `… has a conditional entry for <account>, which the controller does not
+evaluate`. The account is named for well-known and built-in accounts and given
+by its SID otherwise, so the check never waits for a domain controller. The
+last three keys default to the values shown; `partyPollMs` takes 1000 to 60000.
+`check`, and with it Stage, refuses an http URL, a relative token path, an
+unreadable or empty token file, a token file other accounts can open and a
+malformed entity id.
 
 Diagnostics separate screen/helper, Lightshow analysis audio, output eligibility
 and OpenRGB SDK. Analysis frames do not prove MA visualizer audio is supported.
@@ -102,31 +112,43 @@ a few seconds after sign-in, often after the controller started. Explorer
 starts it outside the controller with the kiosk arguments plus
 `--restore-last-session`.
 
-Nothing the controller or the browser launcher starts carries that flag. When
-the controller starts, on Stop, every 3 s while it owns no session and just
-before each Start, it closes every Chrome browser process in this Windows
-session whose only `--user-data-dir` is the configured `browserProfile` and
-which carries `--restore-last-session`: first through its windows, so Chrome
-keeps the screen it was on, and after 15 s by ending the process, as the
-browser launcher's `-Stop` does. Chrome on any other profile, including the
-normal one, is never touched. Manual Off stays Off, and Start opens the
-controller's own window.
-`controller.log` names each closed window and the tray notifies once for each;
-the diagnostics line shows only the latest, such as `Browser: A browser window
-restored by Windows at sign-in was closed (process N) at HH:MM`. While one stays
-open, Start is refused with "A browser window restored by Windows at sign-in is
-open; close it before Start." A window that could not be ended is not tried
-again until the next Start, and is forgotten once it is gone. The first sweep
-that finds no restored window left returns a Start refused this way to Off. The
-Windows setting is left as it is; turning it off also avoids the brief window
-at sign-in.
+Nothing the controller or the browser launcher starts carries that flag. For
+the first 10 minutes after the controller starts (the login task starts it at
+sign-in), every 3 s while it owns no session, and once just before each Start,
+it closes every Chrome browser process in this Windows session whose only
+`--user-data-dir` is the configured `browserProfile` and which carries
+`--restore-last-session`. When the 10 minutes end, a close still in progress
+ends with them, and the next Start closes that window. Outside those sweeps the
+controller does not list processes, read their command lines or end them; Stop,
+sleep and the other commands do not sweep. It closes such a browser first
+through its windows, so Chrome keeps the screen it was on, and after 15 s by
+ending the process, as the browser launcher's `-Stop` does. Chrome on any other
+profile, including the normal one, is never touched. To keep it that way,
+`check`, Stage and the controller refuse a `browserProfile` that is a browser's
+own profile folder: a folder named `User Data` anywhere inside
+`%LOCALAPPDATA%`, such as `Google\Chrome\User Data`, `Google\Chrome Beta\User
+Data`, `Chromium\User Data` or `Microsoft\Edge\User Data`, whichever browser
+`chromeExe` names. Both paths are compared as Windows resolves them, so case,
+trailing separators, 8.3 short names, junctions and links do not matter. The
+kiosk runs on that folder with remote debugging enabled, and Stop and the sweep
+close Chrome on it. Manual Off stays Off, and Start opens the controller's own
+window. `controller.log` names each closed window and the tray notifies once
+for each; the diagnostics line shows only the latest, such as `Browser: A
+browser window restored by Windows at sign-in was closed (process N) at HH:MM`.
+While one stays open, Start is refused with "A browser window restored by
+Windows at sign-in is open; close it before Start." A window that could not be
+ended is not tried again until the next Start, and is forgotten once it is
+gone. Within the first 10 minutes, the first sweep that finds no restored
+window left returns a Start refused this way to Off; later the refusal stays
+until the next Start, which sweeps again, or Stop. The Windows setting is left
+as it is; turning it off also avoids the brief window at sign-in.
 
 Two limits follow from matching the command line. A relative `--user-data-dir`
 is resolved against the controller's working directory, and only the
 `--user-data-dir=` spelling counts. Chrome's own relaunch (after an update or
 `chrome://restart`) also carries `--restore-last-session`, so a dedicated-profile
-window that relaunched itself is closed the same way once the controller owns no
-session, and reported with the sign-in wording.
+window that relaunched itself is closed the same way by the next sweep while the
+controller owns no session, and reported with the sign-in wording.
 
 ## Installation
 
@@ -175,7 +197,28 @@ for example to add the Home Assistant keys, edit a copy of
 ### From a checkout
 
 Build from this directory with `go build -trimpath -o party-visuals.exe
-./cmd/party-visuals`, or use the reviewed Windows CI artifact. In PowerShell 5.1:
+./cmd/party-visuals`, or use the reviewed Windows CI artifact. CI builds also
+carry a Windows version resource (company `tyclab`, description `Party Visuals
+controller`, file and product version from the tag, `0.0.0-dev` for untagged
+builds) and an application manifest: `asInvoker`, so it never asks for
+elevation, per-monitor DPI aware, as the tray sets itself at run time, and
+Windows 10 and 11 as supported systems. CI generates both into
+`cmd/party-visuals/resource_windows_amd64.syso` from
+`cmd/party-visuals/resource/` with goversioninfo, pinned as a tool in `go.mod`,
+so no binary resource is committed. For the same locally, run this before
+`go build`:
+
+```
+go tool goversioninfo -64 -o cmd/party-visuals/resource_windows_amd64.syso -manifest cmd/party-visuals/resource/party-visuals.exe.manifest -propagate-ver-strings -file-version 0.0.0-dev -product-version 0.0.0-dev cmd/party-visuals/resource/versioninfo.json
+```
+
+The executable stays a console program, not a `-H windowsgui` one, because the
+same file is the CLI and `status`, `start`, `stop`, `quit` and the others print
+to the console. Only `app` detaches: it writes its output to `controller.log`
+and, when it is the only process on its console, as under the login task,
+frees that console (FreeConsole).
+
+In PowerShell 5.1:
 
 ```powershell
 ./Install-PartyVisualsController.ps1 -Action Stage `
@@ -185,7 +228,12 @@ Build from this directory with `go build -trimpath -o party-visuals.exe
 
 Stage verifies the hash, validates candidate configuration without launching
 anything, protects local state and exports owned legacy tasks. It leaves the
-active configuration untouched. Existing visuals keep
+active configuration untouched. Stage copies the executable and the worker
+scripts into one release folder (`controller\releases\<hash>`) and points
+`workerScript` there. The controller runs that script with PowerShell's
+execution policy bypassed, so `check`, Stage and the controller refuse a
+`workerScript` that is not in the folder holding the running
+`party-visuals.exe`, naming that folder. Existing visuals keep
 running. Actual host/player values stay in local `controller/config.json`.
 An explicit `-ConfigPath` can replace legacy import. The configuration names
 the existing private NodeCG configuration file; it contains no engine token.

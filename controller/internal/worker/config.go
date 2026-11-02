@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 )
 
 type Config struct {
@@ -39,6 +40,9 @@ type Config struct {
 
 var entityID = regexp.MustCompile(`^[a-z0-9_]+\.[a-z0-9_]+$`)
 
+// executable is os.Executable; tests put the release folder elsewhere.
+var executable = os.Executable
+
 func Load(path string) (Config, error) {
 	f, e := os.Open(path)
 	if e != nil {
@@ -62,6 +66,9 @@ func Load(path string) (Config, error) {
 			return c, fmt.Errorf("%s is missing", name)
 		}
 	}
+	if e = besideExecutable(c.WorkerScript); e != nil {
+		return c, e
+	}
 	for _, raw := range []string{c.VisualizerURL, c.ControlsURL} {
 		u, e := url.Parse(raw)
 		if e != nil || u.User != nil || u.RawQuery != "" || (u.Scheme != "http" && u.Scheme != "https") {
@@ -74,6 +81,9 @@ func Load(path string) (Config, error) {
 	}
 	if c.BrowserProfile == "" || c.NodecgRoot == "" || c.LogFile == "" {
 		return c, errors.New("profile, NodeCG root and log path are required")
+	}
+	if browserRoot(c.BrowserProfile) {
+		return c, errors.New(`browserProfile must be a dedicated folder, not a browser's own profile folder (a User Data folder in %LOCALAPPDATA%, such as Google\Chrome\User Data)`)
 	}
 	if c.HomeAssistantURL == "" && c.HomeAssistantTokenFile == "" && c.PartyEntity == "" && c.PartyValue == "" && c.PartyPollMs == 0 {
 		return c, nil
@@ -101,4 +111,30 @@ func Load(path string) (Config, error) {
 		return c, errors.New("partyPollMs must be between 1000 and 60000")
 	}
 	return c, nil
+}
+
+// besideExecutable accepts a worker script only in the release folder that
+// holds the running executable, where the installer copies both: the
+// controller runs it with PowerShell's execution policy bypassed.
+func besideExecutable(script string) error {
+	exe, e := executable()
+	if e != nil {
+		return fmt.Errorf("workerScript: cannot locate this executable: %w", e)
+	}
+	if dir := filepath.Dir(exe); !sameDir(filepath.Dir(script), dir) {
+		return fmt.Errorf("workerScript must be in the folder that holds this executable (%s), where the installer copies it", dir)
+	}
+	return nil
+}
+
+// browserRoot reports whether profile is a folder named User Data inside
+// %LOCALAPPDATA%, where Chrome and its other channels, Chromium and Edge
+// keep the operator's own profiles, however the path is spelt.
+func browserRoot(profile string) bool {
+	local := os.Getenv("LOCALAPPDATA")
+	if local == "" {
+		return false
+	}
+	p, l := canonical(profile), canonical(local)
+	return strings.EqualFold(filepath.Base(p), "User Data") && len(p) > len(l) && strings.EqualFold(p[:len(l)], l) && os.IsPathSeparator(p[len(l)])
 }

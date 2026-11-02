@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '24'
       - run: npm ci --ignore-scripts
@@ -56,13 +56,22 @@ jobs:
         shell: pwsh
         env:
           VERSION: ${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
+          RESOURCE_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || '0.0.0-dev' }}
         run: |
           $dist = Join-Path $env:RUNNER_TEMP 'party-visuals-controller'
           New-Item -ItemType Directory -Path $dist | Out-Null
+          $exe = Join-Path $dist 'party-visuals.exe'
+          $resourceVersion = $env:RESOURCE_VERSION -replace '^v', ''
           Push-Location controller
-          go build -trimpath -ldflags "-s -w -X main.version=$env:VERSION" -o (Join-Path $dist 'party-visuals.exe') ./cmd/party-visuals
+          go tool goversioninfo -64 -o cmd/party-visuals/resource_windows_amd64.syso -manifest cmd/party-visuals/resource/party-visuals.exe.manifest -propagate-ver-strings -file-version $resourceVersion -product-version $resourceVersion cmd/party-visuals/resource/versioninfo.json
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          go build -trimpath -ldflags "-s -w -X main.version=$env:VERSION" -o $exe ./cmd/party-visuals
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Pop-Location
+          $info = (Get-Item -LiteralPath $exe).VersionInfo
+          if ($info.CompanyName -ne 'tyclab' -or $info.FileDescription -ne 'Party Visuals controller' -or $info.ProductVersion -ne $resourceVersion -or $info.FileVersion -ne $resourceVersion) { throw "Version resource missing or wrong: $($info | Format-List | Out-String)" }
+          $printed = & $exe version
+          if ($LASTEXITCODE -ne 0 -or $printed -ne $env:VERSION) { throw "party-visuals.exe version printed '$printed' (exit $LASTEXITCODE), expected $env:VERSION" }
           foreach ($name in 'Install-PartyVisualsRelease.ps1', 'Install-PartyVisualsController.ps1', 'Run-PartyVisualsSession.ps1', 'Start-PartyVisualsBrowser.ps1', 'Start-PartyVisualsNodecg.ps1') {
             Copy-Item -LiteralPath (Join-Path install $name) -Destination $dist
           }

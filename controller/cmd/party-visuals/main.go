@@ -23,6 +23,13 @@ import (
 
 var version = "dev"
 
+// Windows restores apps seconds after sign-in, when the login task starts the
+// controller, so the restored-window sweep runs on its own only that long.
+const (
+	signInSweep      = 10 * time.Minute
+	signInSweepEvery = 3 * time.Second
+)
+
 type statusView struct {
 	Version     string             `json:"version"`
 	State       lifecycle.Status   `json:"state"`
@@ -260,11 +267,11 @@ func app(root string) error {
 			t.Notify("Party Visuals", text)
 		}
 	}
-	m, e = startManager(ctx, root, &worker.Backend{Config: c, ConfigPath: filepath.Join(root, "config.json"), Notice: notice}, func(s lifecycle.Status) {
+	m, _, e = startManager(ctx, root, &worker.Backend{Config: c, ConfigPath: filepath.Join(root, "config.json"), Notice: notice}, func(s lifecycle.Status) {
 		logger.state(s)
 		source.SetActive(s.Intent.Mode == "follow-party")
 		refresh(s)
-	}, 3*time.Second)
+	}, signInSweepEvery, signInSweep)
 	if e != nil {
 		return e
 	}
@@ -313,27 +320,32 @@ func app(root string) error {
 	return t.Run()
 }
 
-// startManager loads the intent and, until ctx ends, closes every sweepEvery
-// the windows Windows restores at sign-in while the controller owns no
-// session, because they appear seconds after the controller starts.
-func startManager(ctx context.Context, root string, backend lifecycle.Backend, changed func(lifecycle.Status), sweepEvery time.Duration) (*lifecycle.Manager, error) {
-	m, e := lifecycle.New(lifecycle.FileStore{Path: filepath.Join(root, "intent.json")}, backend, changed)
+// startManager loads the intent and, for sweepFor or until ctx ends, closes
+// every sweepEvery the windows Windows restores at sign-in while the
+// controller owns no session, because they appear seconds after it starts.
+// A close still in progress ends with that window too; done closes once the
+// sweeps have ended. After that only the sweep before each Start looks.
+func startManager(ctx context.Context, root string, backend lifecycle.Backend, changed func(lifecycle.Status), sweepEvery, sweepFor time.Duration) (m *lifecycle.Manager, done <-chan struct{}, e error) {
+	m, e = lifecycle.New(lifecycle.FileStore{Path: filepath.Join(root, "intent.json")}, backend, changed)
 	if e != nil {
-		return nil, e
+		return nil, nil, e
 	}
+	ended := make(chan struct{})
 	go func() {
+		defer close(ended)
+		signIn, stop := context.WithTimeout(ctx, sweepFor)
+		defer stop()
 		tick := time.NewTicker(sweepEvery)
 		defer tick.Stop()
-		for {
-			m.CloseRestored(ctx)
+		for signIn.Err() == nil {
+			m.CloseRestored(signIn)
 			select {
-			case <-ctx.Done():
-				return
+			case <-signIn.Done():
 			case <-tick.C:
 			}
 		}
 	}()
-	return m, nil
+	return m, ended, nil
 }
 
 func diagnosticLines(d worker.Diagnostics, p partysource.Status) []string {

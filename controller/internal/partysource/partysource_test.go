@@ -60,6 +60,7 @@ func newRig(t *testing.T, token string, replies ...reply) *rig {
 	if e := os.WriteFile(file, []byte(token), 0600); e != nil {
 		t.Fatal(e)
 	}
+	fakeACL(t, grants(testUser), nil)
 	r.ctx, r.cancel = context.WithCancel(context.Background())
 	t.Cleanup(r.cancel)
 	r.source = New(Config{URL: server.URL, TokenFile: file, Entity: "sensor.house_mode_code", Value: "3", Poll: 5 * time.Second}, r.command, r.logf)

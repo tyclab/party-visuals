@@ -22,17 +22,34 @@ func writeRoot(t *testing.T, extra map[string]any) string {
 	t.Helper()
 	root := t.TempDir()
 	v := map[string]any{"version": 1, "nodecgRoot": root, "browserProfile": filepath.Join(root, "profile"), "logFile": filepath.Join(root, "nodecg.log"), "visualizerUrl": "http://music.example.invalid:8095/#/now-playing?player=test", "controlsUrl": "http://127.0.0.1:9090/bundles/party-visuals/api/state"}
-	for _, name := range []string{"workerScript", "nodeExe", "chromeExe", "helperPath"} {
+	for _, name := range []string{"nodeExe", "chromeExe", "helperPath"} {
 		p := filepath.Join(root, name)
 		os.WriteFile(p, nil, 0600)
 		v[name] = p
 	}
+	v["workerScript"] = besideTestBinary(t, "Run-PartyVisualsSession.ps1")
 	for k, x := range extra {
 		v[k] = x
 	}
 	b, _ := json.Marshal(v)
 	os.WriteFile(filepath.Join(root, "config.json"), b, 0600)
 	return root
+}
+
+// besideTestBinary writes an empty file next to the running test binary,
+// the only folder whose worker script Load accepts.
+func besideTestBinary(t *testing.T, name string) string {
+	t.Helper()
+	exe, e := os.Executable()
+	if e != nil {
+		t.Fatal(e)
+	}
+	p := filepath.Join(filepath.Dir(exe), name)
+	if e = os.WriteFile(p, nil, 0600); e != nil {
+		t.Fatal(e)
+	}
+	t.Cleanup(func() { os.Remove(p) })
+	return p
 }
 func stdout(t *testing.T, f func() error) (string, error) {
 	t.Helper()
@@ -55,6 +72,8 @@ func TestCheckValidatesTheHomeAssistantTokenFile(t *testing.T) {
 		t.Fatalf("unconfigured check: %q, %v", out, e)
 	}
 	token := filepath.Join(t.TempDir(), "ha.token")
+	os.WriteFile(token, nil, 0600)
+	ownerOnly(t, token)
 	root := writeRoot(t, map[string]any{"homeAssistantUrl": "https://ha.example.invalid", "homeAssistantTokenFile": token})
 	for _, content := range []string{"", "\n"} {
 		os.WriteFile(token, []byte(content), 0600)
@@ -66,6 +85,16 @@ func TestCheckValidatesTheHomeAssistantTokenFile(t *testing.T) {
 	out, e = stdout(t, func() error { return run([]string{"--root", root, "check"}) })
 	if e != nil || !strings.Contains(out, "sensor.house_mode_code") || strings.Contains(out, "example-token") {
 		t.Fatalf("configured check: %q, %v", out, e)
+	}
+}
+
+func TestCheckRefusesAWorkerScriptOutsideTheReleaseFolder(t *testing.T) {
+	elsewhere := filepath.Join(t.TempDir(), "Run-PartyVisualsSession.ps1")
+	os.WriteFile(elsewhere, nil, 0600)
+	root := writeRoot(t, map[string]any{"workerScript": elsewhere})
+	_, e := stdout(t, func() error { return run([]string{"--root", root, "check"}) })
+	if e == nil || !strings.Contains(e.Error(), "workerScript must be in the folder that holds this executable") {
+		t.Fatalf("check: %v", e)
 	}
 }
 
@@ -222,26 +251,34 @@ func TestCommandsAndStatesLandInControllerLog(t *testing.T) {
 
 // restoredWindows is a backend on which Windows restores the kiosk at any time.
 type restoredWindows struct {
-	mu   sync.Mutex
-	open int
+	mu     sync.Mutex
+	open   int
+	sweeps []bool
 }
 
 func (r *restoredWindows) Start(context.Context) (lifecycle.Session, error) {
 	return nil, errors.New("no worker in this test")
 }
-func (r *restoredWindows) CloseRestored(context.Context, bool) error {
+func (r *restoredWindows) CloseRestored(_ context.Context, start bool) error {
 	r.mu.Lock()
 	r.open = 0
+	r.sweeps = append(r.sweeps, start)
 	r.mu.Unlock()
 	return nil
 }
 func (r *restoredWindows) windows() int { r.mu.Lock(); defer r.mu.Unlock(); return r.open }
+func (r *restoredWindows) swept() []bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return append([]bool{}, r.sweeps...)
+}
+func (r *restoredWindows) restore() { r.mu.Lock(); r.open = 1; r.mu.Unlock() }
 
 func TestAWindowRestoredAfterStartupIsClosedWithoutACommand(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	b := &restoredWindows{}
-	m, e := startManager(ctx, t.TempDir(), b, nil, 10*time.Millisecond)
+	m, _, e := startManager(ctx, t.TempDir(), b, nil, 10*time.Millisecond, time.Minute)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -252,9 +289,7 @@ func TestAWindowRestoredAfterStartupIsClosedWithoutACommand(t *testing.T) {
 			t.Fatal("restore did not settle")
 		}
 	}
-	b.mu.Lock()
-	b.open = 1 // as on the show PC, 7 s after the controller started
-	b.mu.Unlock()
+	b.restore() // as on the show PC, 7 s after the controller started
 	for end := time.Now().Add(3 * time.Second); b.windows() != 0; time.Sleep(time.Millisecond) {
 		if time.Now().After(end) {
 			t.Fatal("no sweep closed the window restored after startup")
@@ -262,5 +297,80 @@ func TestAWindowRestoredAfterStartupIsClosedWithoutACommand(t *testing.T) {
 	}
 	if s := m.Snapshot(); s.Phase != "off" || !s.Intent.ManualOff {
 		t.Fatalf("the sweep changed the state: %+v", s)
+	}
+}
+
+func TestAfterTheSignInWindowOnlyStartSweeps(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	b := &restoredWindows{}
+	m, done, e := startManager(ctx, t.TempDir(), b, nil, 10*time.Millisecond, 100*time.Millisecond)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer m.Close()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the sign-in sweeps did not end with their 100 ms window")
+	}
+	before := len(b.swept())
+	if before == 0 {
+		t.Fatal("no sweep in the sign-in window")
+	}
+	settled := func() bool { p := m.Snapshot().Phase; return p != "starting" && p != "stopping" }
+	b.restore()
+	for _, c := range []string{"restore", "stop", "follow-party", "manual"} {
+		m.Apply(c)
+		eventually(t, settled)
+	}
+	if b.windows() != 1 || len(b.swept()) != before {
+		t.Fatalf("after the sign-in window: %d windows open, sweeps %d -> %d", b.windows(), before, len(b.swept()))
+	}
+	m.Apply("start")
+	eventually(t, func() bool { return m.Snapshot().Phase == "attention" })
+	if s := b.swept(); b.windows() != 0 || len(s) != before+1 || !s[before] {
+		t.Fatalf("%d windows open, sweeps %v; want one more, before Start", b.windows(), s[before:])
+	}
+}
+
+// slowClose is a backend whose close waits, as for a restored Chrome that
+// ignores WM_CLOSE, until its context ends.
+type slowClose struct{ started, ended chan struct{} }
+
+func (s *slowClose) Start(context.Context) (lifecycle.Session, error) {
+	return nil, errors.New("no worker in this test")
+}
+func (s *slowClose) CloseRestored(ctx context.Context, _ bool) error {
+	close(s.started)
+	<-ctx.Done()
+	close(s.ended)
+	return ctx.Err()
+}
+
+func TestACloseInProgressEndsWithTheSignInWindow(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	b := &slowClose{started: make(chan struct{}), ended: make(chan struct{})}
+	m, done, e := startManager(ctx, t.TempDir(), b, nil, time.Hour, 50*time.Millisecond)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer m.Close()
+	<-b.started
+	select {
+	case <-b.ended:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a close in progress outlived the 50 ms sign-in window")
+	}
+	<-done
+}
+
+func eventually(t *testing.T, f func() bool) {
+	t.Helper()
+	for end := time.Now().Add(5 * time.Second); !f(); time.Sleep(time.Millisecond) {
+		if time.Now().After(end) {
+			t.Fatal("condition did not settle")
+		}
 	}
 }
