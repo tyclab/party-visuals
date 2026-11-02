@@ -118,7 +118,11 @@ processes or read their command lines; Stop, sleep and the other commands do
 not sweep. It closes such a browser first through its windows, so Chrome
 keeps the screen it was on, and after 15 s by ending the process, as the
 browser launcher's `-Stop` does. Chrome on any other profile, including the
-normal one, is never touched. Manual Off stays Off, and Start opens the
+normal one, is never touched. To keep it that way, `check`, Stage and the
+controller refuse a `browserProfile` equal to Chrome's default profile root,
+`%LOCALAPPDATA%\Google\Chrome\User Data` (any case, trailing separators
+ignored): the kiosk runs on that folder with remote debugging enabled, and Stop
+and the sweep close Chrome on it. Manual Off stays Off, and Start opens the
 controller's own window.
 `controller.log` names each closed window and the tray notifies once for each;
 the diagnostics line shows only the latest, such as `Browser: A browser window

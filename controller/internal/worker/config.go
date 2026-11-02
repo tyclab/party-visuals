@@ -81,6 +81,9 @@ func Load(path string) (Config, error) {
 	if c.BrowserProfile == "" || c.NodecgRoot == "" || c.LogFile == "" {
 		return c, errors.New("profile, NodeCG root and log path are required")
 	}
+	if local := os.Getenv("LOCALAPPDATA"); local != "" && sameDir(c.BrowserProfile, filepath.Join(local, "Google", "Chrome", "User Data")) {
+		return c, errors.New(`browserProfile must be a dedicated folder, not Chrome's default profile root %LOCALAPPDATA%\Google\Chrome\User Data`)
+	}
 	if c.HomeAssistantURL == "" && c.HomeAssistantTokenFile == "" && c.PartyEntity == "" && c.PartyValue == "" && c.PartyPollMs == 0 {
 		return c, nil
 	}

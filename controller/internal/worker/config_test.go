@@ -118,3 +118,19 @@ func TestHomeAssistantSourceIsValidated(t *testing.T) {
 		}
 	}
 }
+
+func TestBrowserProfileMustNotBeChromesDefaultProfileRoot(t *testing.T) {
+	local := t.TempDir()
+	t.Setenv("LOCALAPPDATA", local)
+	root := filepath.Join(local, "Google", "Chrome", "User Data")
+	for _, profile := range []string{root, strings.ToUpper(root) + string(filepath.Separator) + string(filepath.Separator)} {
+		if _, e := Load(writeConfig(t, map[string]any{"browserProfile": profile})); e == nil || !strings.Contains(e.Error(), "not Chrome's default profile root") {
+			t.Errorf("browserProfile %q: %v", profile, e)
+		}
+	}
+	for _, profile := range []string{filepath.Join(local, "PartyVisuals", "browser-profile"), filepath.Join(root, "Default"), filepath.Join(local, "Google", "Chrome")} {
+		if _, e := Load(writeConfig(t, map[string]any{"browserProfile": profile})); e != nil {
+			t.Errorf("browserProfile %q: %v", profile, e)
+		}
+	}
+}
