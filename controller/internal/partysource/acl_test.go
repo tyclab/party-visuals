@@ -2,6 +2,8 @@ package partysource
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -57,4 +59,29 @@ func TestUnreadableTokenFilePermissionsRefuseTheToken(t *testing.T) {
 	if _, _, requests := r.snapshot(); requests != 0 {
 		t.Fatalf("%d requests", requests)
 	}
+}
+
+func TestOnlyWellKnownPrincipalsAreLookedUpByName(t *testing.T) {
+	saved := lookupName
+	var asked []string
+	lookupName = func(sid string) string { asked = append(asked, sid); return `BUILTIN\Users` }
+	t.Cleanup(func() { lookupName = saved })
+	const domainUser = "S-1-5-21-1000000001-1000000002-1000000003-1105"
+	fakeACL(t, []string{testUser, domainUser}, nil)
+	if _, e := ReadToken(writeToken(t)); e == nil || !strings.Contains(e.Error(), "access to "+domainUser+";") || len(asked) != 0 {
+		t.Fatalf("a domain account: %v, looked up %v", e, asked)
+	}
+	fakeACL(t, []string{testUser, "S-1-5-32-545"}, nil)
+	if _, e := ReadToken(writeToken(t)); e == nil || !strings.Contains(e.Error(), `BUILTIN\Users (S-1-5-32-545)`) || !reflect.DeepEqual(asked, []string{"S-1-5-32-545"}) {
+		t.Fatalf("a builtin group: %v, looked up %v", e, asked)
+	}
+}
+
+func writeToken(t *testing.T) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "ha.token")
+	if e := os.WriteFile(p, []byte("example-token"), 0600); e != nil {
+		t.Fatal(e)
+	}
+	return p
 }
