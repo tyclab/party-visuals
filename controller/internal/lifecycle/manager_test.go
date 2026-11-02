@@ -332,20 +332,36 @@ func TestStopOfAnEndedSessionIsNotAnError(t *testing.T) {
 // Run-PartyVisualsSession.ps1 does.
 type restoringBackend struct {
 	fakeBackend
-	sweep    sync.Mutex
-	restored int
-	stuck    bool
-	sweeps   int
-	owned    int
+	sweep       sync.Mutex
+	restored    int
+	stuck       bool
+	sweeps      int
+	starts      []bool
+	owned       int
+	startErr    error
+	lateRestore bool
 }
 
 func (b *restoringBackend) Start(ctx context.Context) (Session, error) {
+	b.sweep.Lock()
+	late, err := b.lateRestore, b.startErr
+	if late {
+		// A window Windows restored between the sweep and the worker's own check.
+		b.restored, b.lateRestore = b.restored+1, false
+	}
+	b.sweep.Unlock()
+	if late {
+		return nil, ErrRestoredOpen
+	}
+	if err != nil {
+		return nil, err
+	}
 	if b.open() > 0 {
 		return nil, errors.New("The dedicated browser is already open outside this session; close it before Start.")
 	}
 	return b.fakeBackend.Start(ctx)
 }
-func (b *restoringBackend) CloseRestored(context.Context) error {
+func (b *restoringBackend) CloseRestored(_ context.Context, start bool) error {
 	b.mu.Lock()
 	for _, s := range b.sessions {
 		select {
@@ -358,14 +374,16 @@ func (b *restoringBackend) CloseRestored(context.Context) error {
 	b.sweep.Lock()
 	defer b.sweep.Unlock()
 	b.sweeps++
+	b.starts = append(b.starts, start)
 	if b.restored > 0 && b.stuck {
-		return errors.New("A browser window restored by Windows at sign-in is open; close it before Start")
+		return ErrRestoredOpen
 	}
 	b.restored = 0
 	return nil
 }
-func (b *restoringBackend) restore()  { b.sweep.Lock(); b.restored++; b.sweep.Unlock() }
-func (b *restoringBackend) open() int { b.sweep.Lock(); defer b.sweep.Unlock(); return b.restored }
+func (b *restoringBackend) restore()   { b.sweep.Lock(); b.restored++; b.sweep.Unlock() }
+func (b *restoringBackend) swept() int { b.sweep.Lock(); defer b.sweep.Unlock(); return b.sweeps }
+func (b *restoringBackend) open() int  { b.sweep.Lock(); defer b.sweep.Unlock(); return b.restored }
 func (b *restoringBackend) sweptWhileOwned() int {
 	b.mu.Lock()
 	defer b.mu.Unlock()
@@ -384,6 +402,11 @@ func TestWindowRestoredAtSignInIsClosedAtStartupAndDoesNotBlockStart(t *testing.
 	eventually(t, func() bool { return m.Snapshot().Phase == "running" })
 	if b.count() != 1 || b.sweptWhileOwned() != 0 {
 		t.Fatalf("%d sessions, %d sweeps beside an owned session", b.count(), b.sweptWhileOwned())
+	}
+	b.sweep.Lock()
+	defer b.sweep.Unlock()
+	if last := len(b.starts) - 1; last < 1 || !b.starts[last] || b.starts[last-1] {
+		t.Fatalf("only the sweep before Start may retry windows that could not be ended: %v", b.starts)
 	}
 }
 
@@ -425,10 +448,10 @@ func TestNoSweepWhileASessionIsOwned(t *testing.T) {
 	m, _ := newManager(t, b)
 	m.Apply("start")
 	eventually(t, func() bool { return m.Snapshot().Phase == "running" })
-	before := func() int { b.sweep.Lock(); defer b.sweep.Unlock(); return b.sweeps }()
+	before := b.swept()
 	b.restore()
 	m.CloseRestored(context.Background())
-	if after := func() int { b.sweep.Lock(); defer b.sweep.Unlock(); return b.sweeps }(); after != before || b.open() != 1 {
+	if after := b.swept(); after != before || b.open() != 1 {
 		t.Fatalf("swept beside an owned session: sweeps %d -> %d", before, after)
 	}
 }
@@ -440,7 +463,86 @@ func TestARestoredWindowThatStaysOpenIsNamedWhenStartIsRefused(t *testing.T) {
 	eventually(t, func() bool { return m.Snapshot().Phase == "off" })
 	m.Apply("start")
 	eventually(t, func() bool { return m.Snapshot().Phase == "attention" })
-	if r := m.Snapshot().Reason; !strings.Contains(r, "restored by Windows at sign-in is open") || b.count() != 0 {
+	if r := m.Snapshot().Reason; r != ErrRestoredOpen.Error() || b.count() != 0 {
 		t.Fatalf("reason %q, %d sessions", r, b.count())
 	}
+}
+
+type phaseLog struct {
+	mu     sync.Mutex
+	phases []string
+}
+
+func (l *phaseLog) record(s Status) { l.mu.Lock(); l.phases = append(l.phases, s.Phase); l.mu.Unlock() }
+func (l *phaseLog) get() []string {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return append([]string{}, l.phases...)
+}
+
+func TestStopWhileOffSweepsWithoutPublishing(t *testing.T) {
+	b, l := &restoringBackend{}, &phaseLog{}
+	m, e := New(FileStore{filepath.Join(t.TempDir(), "intent.json")}, b, l.record)
+	if e != nil {
+		t.Fatal(e)
+	}
+	m.Apply("restore")
+	// Restore publishes stopping and off, in either order.
+	eventually(t, func() bool { return len(l.get()) == 2 && m.Snapshot().Phase == "off" })
+	before, generation, sweeps := l.get(), m.Snapshot().Generation, b.swept()
+	for i := 0; i < 3; i++ {
+		b.restore()
+		if e = m.Apply("stop"); e != nil {
+			t.Fatal(e)
+		}
+		eventually(t, func() bool { return b.open() == 0 })
+	}
+	if after := l.get(); len(after) != len(before) || m.Snapshot().Generation != generation || b.swept() != sweeps+3 {
+		t.Fatalf("Stops while Off: phases %v -> %v, generation %d -> %d, sweeps %d -> %d", before, after, generation, m.Snapshot().Generation, sweeps, b.swept())
+	}
+	if e = m.Close(); e != nil {
+		t.Fatal(e)
+	}
+	if after := l.get(); len(after) != len(before) || m.Snapshot().Phase != "off" {
+		t.Fatalf("Close while Off published %v", after[len(before):])
+	}
+}
+
+func TestARefusedStartReturnsToOffOnceNoRestoredWindowIsLeft(t *testing.T) {
+	t.Run("the window that refused the close is gone", func(t *testing.T) {
+		b := &restoringBackend{restored: 1, stuck: true}
+		m, store := newManager(t, b)
+		m.Apply("start")
+		eventually(t, func() bool { return m.Snapshot().Phase == "attention" })
+		m.CloseRestored(context.Background())
+		if s := m.Snapshot(); s.Phase != "attention" || s.Reason != ErrRestoredOpen.Error() {
+			t.Fatalf("cleared while the window is still open: %+v", s)
+		}
+		b.sweep.Lock()
+		b.restored = 0
+		b.sweep.Unlock()
+		m.CloseRestored(context.Background())
+		eventually(t, func() bool { s := m.Snapshot(); return s.Phase == "off" && s.Reason == "" })
+		if v, _ := store.Load(); !v.ManualOff || v.Requested || b.count() != 0 {
+			t.Fatalf("not back to Manual Off: %+v, %d sessions", v, b.count())
+		}
+	})
+	t.Run("the worker refused Start and the sweep closed the window", func(t *testing.T) {
+		b := &restoringBackend{lateRestore: true}
+		m, _ := newManager(t, b)
+		m.Apply("start")
+		eventually(t, func() bool { return m.Snapshot().Reason == ErrRestoredOpen.Error() })
+		m.CloseRestored(context.Background())
+		eventually(t, func() bool { s := m.Snapshot(); return s.Phase == "off" && s.Reason == "" && b.open() == 0 })
+	})
+	t.Run("another refusal stays", func(t *testing.T) {
+		b := &restoringBackend{startErr: errors.New("NodeCG port is already in use outside this controller; no second instance was started.")}
+		m, _ := newManager(t, b)
+		m.Apply("start")
+		eventually(t, func() bool { return m.Snapshot().Phase == "attention" })
+		m.CloseRestored(context.Background())
+		if s := m.Snapshot(); s.Phase != "attention" || !strings.Contains(s.Reason, "NodeCG port") {
+			t.Fatalf("an unrelated refusal was cleared: %+v", s)
+		}
+	})
 }

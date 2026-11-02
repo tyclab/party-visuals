@@ -5,6 +5,8 @@ package worker
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"github.com/tyclab/party-visuals/controller/internal/lifecycle"
 	"net"
 	"os"
 	"path/filepath"
@@ -73,7 +75,7 @@ func TestActualPowerShellSessionUsesOnlyOwnedFixtureProcesses(t *testing.T) {
 	c, configPath := sessionFixture(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
 	defer cancel()
-	s, e := (Backend{Config: c, ConfigPath: configPath}).Start(ctx)
+	s, e := (&Backend{Config: c, ConfigPath: configPath}).Start(ctx)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -95,11 +97,11 @@ func TestWorkerNamesARestoredKioskAndStartsOnceItIsClosed(t *testing.T) {
 	restored := startFixture(t, c.ChromeExe, append(kioskArgs(c.BrowserProfile, c.VisualizerURL)[1:], "--restore-last-session", "--restart")...)
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	b := Backend{Config: c, ConfigPath: configPath}
-	if _, e := b.Start(ctx); e == nil || !strings.Contains(e.Error(), "restored by Windows at sign-in is open") {
+	b := &Backend{Config: c, ConfigPath: configPath}
+	if _, e := b.Start(ctx); !errors.Is(e, lifecycle.ErrRestoredOpen) {
 		t.Fatalf("Start beside a restored kiosk: %v", e)
 	}
-	if e := b.CloseRestored(ctx); e != nil {
+	if e := b.CloseRestored(ctx, true); e != nil {
 		t.Fatal(e)
 	}
 	if _, ok := restored.ended(5 * time.Second); !ok {

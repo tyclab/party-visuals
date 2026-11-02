@@ -5,7 +5,6 @@ package worker
 import (
 	"context"
 	"errors"
-	"fmt"
 	"runtime"
 	"strings"
 	"sync"
@@ -42,7 +41,7 @@ var (
 	})
 )
 
-func closeRestored(ctx context.Context, profile string, notice func(string)) error {
+func closeRestored(ctx context.Context, b *Backend, start bool) error {
 	var session uint32
 	if e := windows.ProcessIdToSessionId(windows.GetCurrentProcessId(), &session); e != nil {
 		return e
@@ -51,32 +50,30 @@ func closeRestored(ctx context.Context, profile string, notice func(string)) err
 	if e != nil {
 		return e
 	}
-	var open error
+	handles := map[uint32]windows.Handle{}
+	defer func() {
+		for _, h := range handles {
+			windows.CloseHandle(h)
+		}
+	}()
+	var found []browser
 	for _, pid := range pids {
 		h, e := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION|windows.SYNCHRONIZE, false, pid)
 		if e != nil {
 			continue
 		}
-		var p process
-		if windows.ProcessIdToSessionId(pid, &p.Session) == nil {
-			p.Args, _ = arguments(h)
+		handles[pid] = h
+		f := browser{browserID: browserID{PID: pid}}
+		var created, exit, kernel, user windows.Filetime
+		if windows.GetProcessTimes(h, &created, &exit, &kernel, &user) == nil && windows.ProcessIdToSessionId(pid, &f.Process.Session) == nil {
+			f.Started = created.Nanoseconds()
+			f.Process.Args, _ = arguments(h)
+			found = append(found, f)
 		}
-		if foreignRestored(p, profile, session) {
-			e = closeBrowser(ctx, h, pid)
-			switch {
-			case ctx.Err() != nil:
-				windows.CloseHandle(h)
-				return ctx.Err()
-			case e != nil:
-				notice(fmt.Sprintf("%s (process %d: %v)", RestoredOpen, pid, e))
-				open = errors.New(RestoredOpen)
-			default:
-				notice(fmt.Sprintf("%s (process %d)", RestoredClosed, pid))
-			}
-		}
-		windows.CloseHandle(h)
 	}
-	return open
+	return b.sweep(ctx, found, session, start, func(ctx context.Context, f browser) error {
+		return closeBrowser(ctx, handles[f.PID], f.PID)
+	})
 }
 
 func chromePIDs() ([]uint32, error) {
@@ -141,7 +138,7 @@ func closeBrowser(ctx context.Context, h windows.Handle, pid uint32) error {
 	if exited(h, 5*time.Second) {
 		return nil
 	}
-	return fmt.Errorf("still running after it was ended: %v", e)
+	return endFailure(e, 5*time.Second)
 }
 
 func exited(h windows.Handle, wait time.Duration) bool {

@@ -34,10 +34,16 @@ type Backend interface {
 
 // Sweeper is a Backend that can close dedicated-browser windows Windows
 // restored at sign-in. The controller starts none of them, so the manager
-// calls it only while it owns no session.
+// calls it only while it owns no session; start retries windows that could
+// not be ended before.
 type Sweeper interface {
-	CloseRestored(context.Context) error
+	CloseRestored(ctx context.Context, start bool) error
 }
+
+// ErrRestoredOpen refuses Start while such a window is open. A later sweep
+// that leaves none open returns the controller to Off.
+var ErrRestoredOpen = errors.New("A browser window restored by Windows at sign-in is open; close it before Start.")
+
 type Store interface {
 	Load() (Intent, error)
 	Save(Intent) error
@@ -54,6 +60,9 @@ type Manager struct {
 	changed func(Status)
 	closed  bool
 	wg      sync.WaitGroup
+	life    context.Context
+	end     context.CancelFunc
+	blocked uint64 // generation whose Start ErrRestoredOpen refused; guarded by run
 }
 
 func New(store Store, backend Backend, changed func(Status)) (*Manager, error) {
@@ -70,7 +79,8 @@ func New(store Store, backend Backend, changed func(Status)) (*Manager, error) {
 			return nil, err
 		}
 	}
-	return &Manager{store: store, backend: backend, state: Status{Intent: intent, Phase: "off"}, changed: changed}, nil
+	life, end := context.WithCancel(context.Background())
+	return &Manager{store: store, backend: backend, state: Status{Intent: intent, Phase: "off"}, changed: changed, life: life, end: end}, nil
 }
 
 func (m *Manager) Snapshot() Status { m.mu.Lock(); defer m.mu.Unlock(); return m.state }
@@ -129,7 +139,14 @@ func (m *Manager) apply(command, reason string, expectedGeneration uint64) error
 		}
 	}
 	next.Reason = reason
-	if next == m.state && command != "restore" && command != "stop" && !(command == "start" && m.state.Phase == "attention") {
+	if next == m.state && command == "stop" {
+		// Already Off: Stop still closes a window Windows restored, and publishes nothing.
+		m.wg.Add(1)
+		go func() { defer m.wg.Done(); m.CloseRestored(m.life) }()
+		m.mu.Unlock()
+		return nil
+	}
+	if next == m.state && command != "restore" && !(command == "start" && m.state.Phase == "attention") {
 		m.mu.Unlock()
 		return nil
 	}
@@ -168,15 +185,28 @@ func (m *Manager) CloseRestored(ctx context.Context) {
 	m.mu.Lock()
 	closed := m.closed
 	m.mu.Unlock()
-	if !closed {
-		_ = m.closeRestored(ctx)
+	if closed || m.session != nil {
+		return
+	}
+	if err := m.closeRestored(ctx, false); err == nil && m.blocked != 0 {
+		gen := m.blocked
+		m.blocked = 0
+		_ = m.apply("stop", "", gen)
 	}
 }
-func (m *Manager) closeRestored(ctx context.Context) error {
+func (m *Manager) closeRestored(ctx context.Context, start bool) error {
 	if s, ok := m.backend.(Sweeper); ok && m.session == nil {
-		return s.CloseRestored(ctx)
+		return s.CloseRestored(ctx, start)
 	}
 	return nil
+}
+
+// refuse publishes a refused Start and remembers one a restored window caused.
+func (m *Manager) refuse(gen uint64, err error) {
+	if errors.Is(err, ErrRestoredOpen) {
+		m.blocked = gen
+	}
+	m.publish(gen, "attention", err.Error())
 }
 
 func (m *Manager) current(gen uint64) bool {
@@ -220,6 +250,7 @@ func (m *Manager) reconcile(ctx context.Context, gen uint64, want bool) {
 	if !m.current(gen) {
 		return
 	}
+	m.blocked = 0
 	if m.session != nil {
 		if err := stop(m.session); err != nil {
 			m.publish(gen, "attention", "Owned processes did not stop: "+err.Error())
@@ -231,7 +262,7 @@ func (m *Manager) reconcile(ctx context.Context, gen uint64, want bool) {
 		return
 	}
 	if !want {
-		_ = m.closeRestored(ctx)
+		_ = m.closeRestored(ctx, false)
 		s := m.Snapshot()
 		phase := "off"
 		if s.Suspended {
@@ -245,16 +276,14 @@ func (m *Manager) reconcile(ctx context.Context, gen uint64, want bool) {
 		m.publish(gen, phase, s.Reason)
 		return
 	}
-	if err := m.closeRestored(ctx); err != nil {
-		if ctx.Err() == nil {
-			m.publish(gen, "attention", err.Error())
-		}
-		return
+	err := m.closeRestored(ctx, true)
+	var session Session
+	if err == nil {
+		session, err = m.backend.Start(ctx)
 	}
-	session, err := m.backend.Start(ctx)
 	if err != nil {
 		if ctx.Err() == nil {
-			m.publish(gen, "attention", err.Error())
+			m.refuse(gen, err)
 		}
 		return
 	}
@@ -289,6 +318,7 @@ func (m *Manager) Close() error {
 	if m.cancel != nil {
 		m.cancel()
 	}
+	m.end()
 	m.mu.Unlock()
 	m.run.Lock()
 	err := stop(m.session)

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"github.com/tyclab/party-visuals/controller/internal/lifecycle"
@@ -12,7 +13,9 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 )
 
 func writeRoot(t *testing.T, extra map[string]any) string {
@@ -135,7 +138,7 @@ func TestRestoredWindowNoticesLandInControllerLogAndDiagnostics(t *testing.T) {
 	if lines := diagnosticLines(worker.Diagnostics{Browser: l.browserNote()}, partysource.Status{}); strings.HasPrefix(lines[len(lines)-1], "Browser:") {
 		t.Fatal("a Browser line without a restored window")
 	}
-	open := worker.RestoredOpen + " (process 41: access denied)"
+	open := strings.TrimSuffix(lifecycle.ErrRestoredOpen.Error(), ".") + " (process 41: access denied)"
 	if !l.restored(open) || l.restored(open) {
 		t.Fatal("a repeated notice was not recognised")
 	}
@@ -163,10 +166,13 @@ func TestCommandsAndStatesLandInControllerLog(t *testing.T) {
 	}
 	l := &controllerLog{Logger: log.New(f, "", log.LstdFlags)}
 	apply := func(c string) error {
-		if c == "party-on" {
+		switch c {
+		case "party-on":
 			return errors.New("controller is shutting down")
+		case "start", "stop", "follow-party", "quit":
+			return nil
 		}
-		return nil
+		return errors.New("unknown controller command")
 	}
 	server, e := owner.Listen(root, func() any { return statusView{} }, l.command("cli", apply))
 	if e != nil {
@@ -184,25 +190,77 @@ func TestCommandsAndStatesLandInControllerLog(t *testing.T) {
 	if _, e = stdout(t, func() error { return run([]string{"--root", root, "party", "on"}) }); e == nil {
 		t.Fatal("refused command reported success")
 	}
+	if _, e = owner.Call(root, "start\nphase running (mode manual, Start requested)"); e == nil {
+		t.Fatal("a command with a line break was accepted")
+	}
 	off := lifecycle.Status{Phase: "off", Intent: lifecycle.Intent{Version: 1, Mode: "manual", ManualOff: true}}
 	l.state(off)
 	l.state(off)
 	refused := off
-	refused.Phase, refused.Reason = "attention", worker.RestoredOpen
+	refused.Phase, refused.Reason = "attention", lifecycle.ErrRestoredOpen.Error()
 	l.state(refused)
 	f.Close()
 	b := readLog(t, root)
 	for _, want := range []string{
-		"command start from tray: accepted\n",
-		"command stop from cli: accepted\n",
-		"command follow-party from cli: accepted\n",
-		"command quit from cli: accepted\n",
-		"command party-on from cli: refused: controller is shutting down\n",
+		`command "start" from tray: accepted` + "\n",
+		`command "stop" from cli: accepted` + "\n",
+		`command "follow-party" from cli: accepted` + "\n",
+		`command "quit" from cli: accepted` + "\n",
+		`command "party-on" from cli: refused: controller is shutting down` + "\n",
+		`command "start\nphase running (mode manual, Start requested)" from cli: refused: unknown controller command` + "\n",
 		"phase off (mode manual, Manual Off)\n",
-		"phase attention (mode manual, Manual Off): A browser window restored by Windows at sign-in is open; close it before Start\n",
+		"phase attention (mode manual, Manual Off): A browser window restored by Windows at sign-in is open; close it before Start.\n",
 	} {
 		if strings.Count(b, want) != 1 {
 			t.Errorf("controller.log lacks one %q:\n%s", want, b)
 		}
+	}
+	if strings.Contains(b, "\nphase running") {
+		t.Fatalf("a command forged a log line:\n%s", b)
+	}
+}
+
+// restoredWindows is a backend on which Windows restores the kiosk at any time.
+type restoredWindows struct {
+	mu   sync.Mutex
+	open int
+}
+
+func (r *restoredWindows) Start(context.Context) (lifecycle.Session, error) {
+	return nil, errors.New("no worker in this test")
+}
+func (r *restoredWindows) CloseRestored(context.Context, bool) error {
+	r.mu.Lock()
+	r.open = 0
+	r.mu.Unlock()
+	return nil
+}
+func (r *restoredWindows) windows() int { r.mu.Lock(); defer r.mu.Unlock(); return r.open }
+
+func TestAWindowRestoredAfterStartupIsClosedWithoutACommand(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	b := &restoredWindows{}
+	m, e := startManager(ctx, t.TempDir(), b, nil, 10*time.Millisecond)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer m.Close()
+	m.Apply("restore")
+	for end := time.Now().Add(3 * time.Second); m.Snapshot().Phase != "off"; time.Sleep(time.Millisecond) {
+		if time.Now().After(end) {
+			t.Fatal("restore did not settle")
+		}
+	}
+	b.mu.Lock()
+	b.open = 1 // as on the show PC, 7 s after the controller started
+	b.mu.Unlock()
+	for end := time.Now().Add(3 * time.Second); b.windows() != 0; time.Sleep(time.Millisecond) {
+		if time.Now().After(end) {
+			t.Fatal("no sweep closed the window restored after startup")
+		}
+	}
+	if s := m.Snapshot(); s.Phase != "off" || !s.Intent.ManualOff {
+		t.Fatalf("the sweep changed the state: %+v", s)
 	}
 }

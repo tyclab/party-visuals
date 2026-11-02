@@ -2,16 +2,18 @@ package worker
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"github.com/tyclab/party-visuals/controller/internal/lifecycle"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // Windows' "restart apps after sign-in" relaunches a Chrome that was open at
-// shutdown with --restore-last-session added. The notices name that window.
-const (
-	RestoredClosed = "A browser window restored by Windows at sign-in was closed"
-	RestoredOpen   = "A browser window restored by Windows at sign-in is open; close it before Start"
-)
+// shutdown with --restore-last-session added. lifecycle.ErrRestoredOpen
+// names one still open.
+const RestoredClosed = "A browser window restored by Windows at sign-in was closed"
 
 type process struct {
 	Session uint32
@@ -50,13 +52,72 @@ func sameDir(a, b string) bool {
 	return strings.EqualFold(full(a), full(b))
 }
 
+// browser is one chrome.exe; its start time tells a reused PID apart.
+type browser struct {
+	browserID
+	Process process
+}
+type browserID struct {
+	PID     uint32
+	Started int64
+}
+
 // CloseRestored closes each dedicated-profile Chrome Windows restored at
 // sign-in, through its windows first as Close-VisualsBrowser does, reports
-// each to Notice, and returns RestoredOpen while one stays open.
-func (b Backend) CloseRestored(ctx context.Context) error {
+// each to Notice, and returns lifecycle.ErrRestoredOpen while one stays open.
+func (b *Backend) CloseRestored(ctx context.Context, start bool) error {
+	return closeRestored(ctx, b, start)
+}
+
+// sweep closes the restored browsers among found with end. One that could not
+// be ended is skipped, still open, until a sweep before Start or until it is gone.
+func (b *Backend) sweep(ctx context.Context, found []browser, session uint32, start bool, end func(context.Context, browser) error) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
 	notice := b.Notice
 	if notice == nil {
 		notice = func(string) {}
 	}
-	return closeRestored(ctx, b.Config.BrowserProfile, notice)
+	present := map[browserID]bool{}
+	var open error
+	for _, f := range found {
+		if !foreignRestored(f.Process, b.Config.BrowserProfile, session) {
+			continue
+		}
+		id := f.browserID
+		present[id] = true
+		if b.stuck[id] && !start {
+			open = lifecycle.ErrRestoredOpen
+			continue
+		}
+		e := end(ctx, f)
+		switch {
+		case ctx.Err() != nil:
+			return ctx.Err()
+		case e != nil:
+			if b.stuck == nil {
+				b.stuck = map[browserID]bool{}
+			}
+			b.stuck[id] = true
+			notice(fmt.Sprintf("%s (process %d: %v)", strings.TrimSuffix(lifecycle.ErrRestoredOpen.Error(), "."), f.PID, e))
+			open = lifecycle.ErrRestoredOpen
+		default:
+			delete(b.stuck, id)
+			notice(fmt.Sprintf("%s (process %d)", RestoredClosed, f.PID))
+		}
+	}
+	for id := range b.stuck {
+		if !present[id] {
+			delete(b.stuck, id)
+		}
+	}
+	return open
+}
+
+// endFailure describes a browser that outlived TerminateProcess's result.
+func endFailure(terminate error, wait time.Duration) error {
+	if terminate != nil {
+		return fmt.Errorf("could not be ended: %w", terminate)
+	}
+	return errors.New("still running " + wait.String() + " after it was ended")
 }

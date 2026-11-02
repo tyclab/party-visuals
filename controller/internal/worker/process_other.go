@@ -15,4 +15,6 @@ func newJob() (job, error) {
 }
 
 // closeRestored has nothing to close: only Windows restores apps at sign-in.
-func closeRestored(context.Context, string, func(string)) error { return nil }
+func closeRestored(ctx context.Context, b *Backend, start bool) error {
+	return b.sweep(ctx, nil, 0, start, nil)
+}

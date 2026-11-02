@@ -260,11 +260,11 @@ func app(root string) error {
 			t.Notify("Party Visuals", text)
 		}
 	}
-	m, e = lifecycle.New(lifecycle.FileStore{Path: filepath.Join(root, "intent.json")}, worker.Backend{Config: c, ConfigPath: filepath.Join(root, "config.json"), Notice: notice}, func(s lifecycle.Status) {
+	m, e = startManager(ctx, root, &worker.Backend{Config: c, ConfigPath: filepath.Join(root, "config.json"), Notice: notice}, func(s lifecycle.Status) {
 		logger.state(s)
 		source.SetActive(s.Intent.Mode == "follow-party")
 		refresh(s)
-	})
+	}, 3*time.Second)
 	if e != nil {
 		return e
 	}
@@ -296,18 +296,6 @@ func app(root string) error {
 			}
 		}
 	}()
-	go func() {
-		tick := time.NewTicker(3 * time.Second)
-		defer tick.Stop()
-		for {
-			m.CloseRestored(ctx)
-			select {
-			case <-ctx.Done():
-				return
-			case <-tick.C:
-			}
-		}
-	}()
 	signals := make(chan os.Signal, 1)
 	signal.Notify(signals, os.Interrupt)
 	defer signal.Stop(signals)
@@ -323,6 +311,29 @@ func app(root string) error {
 		return e
 	}
 	return t.Run()
+}
+
+// startManager loads the intent and, until ctx ends, closes every sweepEvery
+// the windows Windows restores at sign-in while the controller owns no
+// session, because they appear seconds after the controller starts.
+func startManager(ctx context.Context, root string, backend lifecycle.Backend, changed func(lifecycle.Status), sweepEvery time.Duration) (*lifecycle.Manager, error) {
+	m, e := lifecycle.New(lifecycle.FileStore{Path: filepath.Join(root, "intent.json")}, backend, changed)
+	if e != nil {
+		return nil, e
+	}
+	go func() {
+		tick := time.NewTicker(sweepEvery)
+		defer tick.Stop()
+		for {
+			m.CloseRestored(ctx)
+			select {
+			case <-ctx.Done():
+				return
+			case <-tick.C:
+			}
+		}
+	}()
+	return m, nil
 }
 
 func diagnosticLines(d worker.Diagnostics, p partysource.Status) []string {
@@ -347,9 +358,9 @@ func (l *controllerLog) command(source string, run func(string) error) func(stri
 	return func(command string) error {
 		e := run(command)
 		if e != nil {
-			l.Printf("command %s from %s: refused: %v", command, source, e)
+			l.Printf("command %q from %s: refused: %v", command, source, e)
 		} else {
-			l.Printf("command %s from %s: accepted", command, source)
+			l.Printf("command %q from %s: accepted", command, source)
 		}
 		return e
 	}

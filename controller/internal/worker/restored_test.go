@@ -1,9 +1,14 @@
 package worker
 
 import (
+	"context"
+	"errors"
+	"github.com/tyclab/party-visuals/controller/internal/lifecycle"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // kioskArgs is the command line Get-BrowserArguments gives the dedicated browser.
@@ -39,5 +44,65 @@ func TestOnlyTheDedicatedProfileRestoredAtSignInIsForeignRestored(t *testing.T) 
 	}
 	if foreignRestored(process{Session: 1, Args: restored}, "", 1) {
 		t.Error("an empty profile matched")
+	}
+}
+
+func TestASweepSkipsABrowserThatCouldNotBeEndedUntilStartOrUntilItIsGone(t *testing.T) {
+	profile := filepath.Join(t.TempDir(), "browser-profile")
+	restored := process{Session: 1, Args: append(kioskArgs(profile, testVisualizer), "--restore-last-session")}
+	stuck := browser{browserID{PID: 41, Started: 100}, restored}
+	var notices []string
+	b := &Backend{Config: Config{BrowserProfile: profile}, Notice: func(s string) { notices = append(notices, s) }}
+	tries := map[uint32]int{}
+	end := func(_ context.Context, f browser) error {
+		tries[f.PID]++
+		if f.PID == 41 {
+			return errors.New("access denied")
+		}
+		return nil
+	}
+	sweep := func(start bool, found ...browser) error { return b.sweep(context.Background(), found, 1, start, end) }
+	for i := 0; i < 3; i++ {
+		if e := sweep(false, stuck); !errors.Is(e, lifecycle.ErrRestoredOpen) {
+			t.Fatalf("sweep %d: %v", i, e)
+		}
+	}
+	if tries[41] != 1 || len(notices) != 1 || !strings.HasSuffix(notices[0], "(process 41: access denied)") {
+		t.Fatalf("a browser that could not be ended was tried %d times; notices %q", tries[41], notices)
+	}
+	if e := sweep(false, stuck, browser{browserID{PID: 42, Started: 100}, restored}); !errors.Is(e, lifecycle.ErrRestoredOpen) || tries[42] != 1 {
+		t.Fatalf("another restored browser beside it: %v, tried %d times", e, tries[42])
+	}
+	if e := sweep(true, stuck); !errors.Is(e, lifecycle.ErrRestoredOpen) || tries[41] != 2 {
+		t.Fatalf("the sweep before Start must try again: %v, tried %d times", e, tries[41])
+	}
+	if e := sweep(false); e != nil {
+		t.Fatalf("with the browser gone: %v", e)
+	}
+	if e := sweep(false, stuck); !errors.Is(e, lifecycle.ErrRestoredOpen) || tries[41] != 3 {
+		t.Fatalf("a browser that is gone is forgotten, so its next appearance is tried: %v, tried %d times", e, tries[41])
+	}
+	reused := browser{browserID{PID: 41, Started: 200}, restored}
+	if sweep(false, reused); tries[41] != 4 {
+		t.Fatalf("a reused PID is a new browser: tried %d times", tries[41])
+	}
+}
+
+func TestTheWorkerRefusesWithTheSameTextAsTheController(t *testing.T) {
+	// Start maps the worker's refusal to lifecycle.ErrRestoredOpen by its text.
+	b, e := os.ReadFile(filepath.Join("..", "..", "..", "install", "Run-PartyVisualsSession.ps1"))
+	if e != nil || !strings.Contains(string(b), "throw '"+lifecycle.ErrRestoredOpen.Error()+"'") {
+		t.Fatalf("Run-PartyVisualsSession.ps1 does not throw %q: %v", lifecycle.ErrRestoredOpen, e)
+	}
+}
+
+func TestEndFailureNamesWhatFailed(t *testing.T) {
+	for _, e := range []error{endFailure(nil, 5*time.Second), endFailure(errors.New("Access is denied."), 5*time.Second)} {
+		if strings.Contains(e.Error(), "<nil>") {
+			t.Fatalf("%q", e)
+		}
+	}
+	if e := endFailure(nil, 5*time.Second).Error(); e != "still running 5s after it was ended" {
+		t.Fatalf("%q", e)
 	}
 }

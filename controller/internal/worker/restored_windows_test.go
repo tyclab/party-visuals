@@ -110,8 +110,8 @@ func TestCloseRestoredEndsOnlyTheDedicatedKioskWindowsRestored(t *testing.T) {
 	normal := startFixture(t, chrome, "--restore-last-session", "--restart")
 	var mu sync.Mutex
 	var notices []string
-	b := Backend{Config: Config{BrowserProfile: profile}, Notice: func(s string) { mu.Lock(); notices = append(notices, s); mu.Unlock() }}
-	if e := b.CloseRestored(context.Background()); e != nil {
+	b := &Backend{Config: Config{BrowserProfile: profile}, Notice: func(s string) { mu.Lock(); notices = append(notices, s); mu.Unlock() }}
+	if e := b.CloseRestored(context.Background(), false); e != nil {
 		t.Fatal(e)
 	}
 	if code, ok := withWindow.ended(5 * time.Second); !ok || code != 0 {
@@ -130,7 +130,7 @@ func TestCloseRestoredEndsOnlyTheDedicatedKioskWindowsRestored(t *testing.T) {
 	if len(notices) != 2 || !strings.HasPrefix(notices[0], RestoredClosed) || !strings.HasPrefix(notices[1], RestoredClosed) {
 		t.Fatalf("notices %q", notices)
 	}
-	if e := b.CloseRestored(context.Background()); e != nil || len(notices) != 2 {
+	if e := b.CloseRestored(context.Background(), false); e != nil || len(notices) != 2 {
 		t.Fatalf("a second sweep: %v, notices %q", e, notices)
 	}
 }
