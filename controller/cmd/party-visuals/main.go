@@ -267,7 +267,7 @@ func app(root string) error {
 			t.Notify("Party Visuals", text)
 		}
 	}
-	m, e = startManager(ctx, root, &worker.Backend{Config: c, ConfigPath: filepath.Join(root, "config.json"), Notice: notice}, func(s lifecycle.Status) {
+	m, _, e = startManager(ctx, root, &worker.Backend{Config: c, ConfigPath: filepath.Join(root, "config.json"), Notice: notice}, func(s lifecycle.Status) {
 		logger.state(s)
 		source.SetActive(s.Intent.Mode == "follow-party")
 		refresh(s)
@@ -323,28 +323,29 @@ func app(root string) error {
 // startManager loads the intent and, for sweepFor or until ctx ends, closes
 // every sweepEvery the windows Windows restores at sign-in while the
 // controller owns no session, because they appear seconds after it starts.
-// After that only the sweep before each Start looks for them.
-func startManager(ctx context.Context, root string, backend lifecycle.Backend, changed func(lifecycle.Status), sweepEvery, sweepFor time.Duration) (*lifecycle.Manager, error) {
-	m, e := lifecycle.New(lifecycle.FileStore{Path: filepath.Join(root, "intent.json")}, backend, changed)
+// A close still in progress ends with that window too; done closes once the
+// sweeps have ended. After that only the sweep before each Start looks.
+func startManager(ctx context.Context, root string, backend lifecycle.Backend, changed func(lifecycle.Status), sweepEvery, sweepFor time.Duration) (m *lifecycle.Manager, done <-chan struct{}, e error) {
+	m, e = lifecycle.New(lifecycle.FileStore{Path: filepath.Join(root, "intent.json")}, backend, changed)
 	if e != nil {
-		return nil, e
+		return nil, nil, e
 	}
+	ended := make(chan struct{})
 	go func() {
-		tick, window := time.NewTicker(sweepEvery), time.NewTimer(sweepFor)
+		defer close(ended)
+		signIn, stop := context.WithTimeout(ctx, sweepFor)
+		defer stop()
+		tick := time.NewTicker(sweepEvery)
 		defer tick.Stop()
-		defer window.Stop()
-		for {
-			m.CloseRestored(ctx)
+		for signIn.Err() == nil {
+			m.CloseRestored(signIn)
 			select {
-			case <-ctx.Done():
-				return
-			case <-window.C:
-				return
+			case <-signIn.Done():
 			case <-tick.C:
 			}
 		}
 	}()
-	return m, nil
+	return m, ended, nil
 }
 
 func diagnosticLines(d worker.Diagnostics, p partysource.Status) []string {

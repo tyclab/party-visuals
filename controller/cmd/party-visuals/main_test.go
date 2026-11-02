@@ -276,7 +276,7 @@ func TestAWindowRestoredAfterStartupIsClosedWithoutACommand(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	b := &restoredWindows{}
-	m, e := startManager(ctx, t.TempDir(), b, nil, 10*time.Millisecond, time.Minute)
+	m, _, e := startManager(ctx, t.TempDir(), b, nil, 10*time.Millisecond, time.Minute)
 	if e != nil {
 		t.Fatal(e)
 	}
@@ -302,43 +302,73 @@ func TestAfterTheSignInWindowOnlyStartSweeps(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	b := &restoredWindows{}
-	m, e := startManager(ctx, t.TempDir(), b, nil, 10*time.Millisecond, 100*time.Millisecond)
+	m, done, e := startManager(ctx, t.TempDir(), b, nil, 10*time.Millisecond, 100*time.Millisecond)
 	if e != nil {
 		t.Fatal(e)
 	}
 	defer m.Close()
-	m.Apply("restore")
-	for end := time.Now().Add(3 * time.Second); len(b.swept()) < 2; time.Sleep(time.Millisecond) {
-		if time.Now().After(end) {
-			t.Fatal("no sweep every 10 ms in the sign-in window")
-		}
-	}
-	// The window ends after 100 ms; wait until no sweep came for 100 ms.
-	end := time.Now().Add(3 * time.Second)
-	for n, quiet := len(b.swept()), time.Now(); time.Since(quiet) < 100*time.Millisecond; time.Sleep(5 * time.Millisecond) {
-		if len(b.swept()) != n {
-			n, quiet = len(b.swept()), time.Now()
-		}
-		if time.Now().After(end) {
-			t.Fatal("sweeps went on 3 s past the 100 ms sign-in window")
-		}
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the sign-in sweeps did not end with their 100 ms window")
 	}
 	before := len(b.swept())
+	if before == 0 {
+		t.Fatal("no sweep in the sign-in window")
+	}
+	settled := func() bool { p := m.Snapshot().Phase; return p != "starting" && p != "stopping" }
 	b.restore()
-	m.Apply("stop")
-	m.Apply("follow-party")
-	time.Sleep(100 * time.Millisecond)
+	for _, c := range []string{"restore", "stop", "follow-party", "manual"} {
+		m.Apply(c)
+		eventually(t, settled)
+	}
 	if b.windows() != 1 || len(b.swept()) != before {
 		t.Fatalf("after the sign-in window: %d windows open, sweeps %d -> %d", b.windows(), before, len(b.swept()))
 	}
-	m.Apply("manual")
 	m.Apply("start")
-	for end := time.Now().Add(3 * time.Second); b.windows() != 0; time.Sleep(time.Millisecond) {
-		if time.Now().After(end) {
-			t.Fatal("Start did not sweep first")
-		}
+	eventually(t, func() bool { return m.Snapshot().Phase == "attention" })
+	if s := b.swept(); b.windows() != 0 || len(s) != before+1 || !s[before] {
+		t.Fatalf("%d windows open, sweeps %v; want one more, before Start", b.windows(), s[before:])
 	}
-	if s := b.swept(); len(s) != before+1 || !s[before] {
-		t.Fatalf("sweeps %v, want one more, before Start", s[before:])
+}
+
+// slowClose is a backend whose close waits, as for a restored Chrome that
+// ignores WM_CLOSE, until its context ends.
+type slowClose struct{ started, ended chan struct{} }
+
+func (s *slowClose) Start(context.Context) (lifecycle.Session, error) {
+	return nil, errors.New("no worker in this test")
+}
+func (s *slowClose) CloseRestored(ctx context.Context, _ bool) error {
+	close(s.started)
+	<-ctx.Done()
+	close(s.ended)
+	return ctx.Err()
+}
+
+func TestACloseInProgressEndsWithTheSignInWindow(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	b := &slowClose{started: make(chan struct{}), ended: make(chan struct{})}
+	m, done, e := startManager(ctx, t.TempDir(), b, nil, time.Hour, 50*time.Millisecond)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer m.Close()
+	<-b.started
+	select {
+	case <-b.ended:
+	case <-time.After(5 * time.Second):
+		t.Fatal("a close in progress outlived the 50 ms sign-in window")
+	}
+	<-done
+}
+
+func eventually(t *testing.T, f func() bool) {
+	t.Helper()
+	for end := time.Now().Add(5 * time.Second); !f(); time.Sleep(time.Millisecond) {
+		if time.Now().After(end) {
+			t.Fatal("condition did not settle")
+		}
 	}
 }

@@ -113,9 +113,10 @@ the first 10 minutes after the controller starts (the login task starts it at
 sign-in), every 3 s while it owns no session, and once just before each Start,
 it closes every Chrome browser process in this Windows session whose only
 `--user-data-dir` is the configured `browserProfile` and which carries
-`--restore-last-session`. Outside those sweeps the controller does not list
-processes or read their command lines; Stop, sleep and the other commands do
-not sweep. It closes such a browser first through its windows, so Chrome
+`--restore-last-session`. When the 10 minutes end, a close still in progress
+ends with them, and the next Start closes that window. Outside those sweeps
+the controller does not list processes, read their command lines or end them;
+Stop, sleep and the other commands do not sweep. It closes such a browser first through its windows, so Chrome
 keeps the screen it was on, and after 15 s by ending the process, as the
 browser launcher's `-Stop` does. Chrome on any other profile, including the
 normal one, is never touched. To keep it that way, `check`, Stage and the
