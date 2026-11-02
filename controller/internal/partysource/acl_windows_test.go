@@ -24,12 +24,14 @@ func TestTheTokenFileDACLAdmitsOnlyThisUserSystemAndAdministrators(t *testing.T)
 	if _, e = ReadToken(file); e != nil {
 		t.Fatalf("a token file in this user's temporary folder: %v", e)
 	}
-	for _, c := range []struct{ name, sddl, other string }{
-		{"user, SYSTEM and Administrators", "D:P(A;;FA;;;" + user + ")(A;;FA;;;SY)(A;;FA;;;BA)", ""},
-		{"a deny for Guests grants nothing", "D:P(D;;FA;;;BG)(A;;FA;;;" + user + ")", ""},
-		{"Users may read", "D:P(A;;FA;;;" + user + ")(A;;FR;;;BU)", "S-1-5-32-545"},
-		{"Everyone may read", "D:P(A;;FA;;;" + user + ")(A;;FR;;;WD)", "S-1-1-0"},
-		{"no DACL", "D:NO_ACCESS_CONTROL", "S-1-1-0"},
+	const opened, conditional = "also grants access to", "conditional entry for"
+	for _, c := range []struct{ name, sddl, refusal, sid string }{
+		{"user, SYSTEM and Administrators", "D:P(A;;FA;;;" + user + ")(A;;FA;;;SY)(A;;FA;;;BA)", "", ""},
+		{"a deny for Guests grants nothing", "D:P(D;;FA;;;BG)(A;;FA;;;" + user + ")", "", ""},
+		{"Users may read", "D:P(A;;FA;;;" + user + ")(A;;FR;;;BU)", opened, "S-1-5-32-545"},
+		{"Everyone may read", "D:P(A;;FA;;;" + user + ")(A;;FR;;;WD)", opened, "S-1-1-0"},
+		{"Everyone may read if an administrator", "D:P(A;;FA;;;" + user + ")(XA;;FR;;;WD;(Member_of {SID(BA)}))", conditional, "S-1-1-0"},
+		{"no DACL", "D:NO_ACCESS_CONTROL", opened, "S-1-1-0"},
 	} {
 		sd, e := windows.SecurityDescriptorFromString(c.sddl)
 		if e != nil {
@@ -44,10 +46,10 @@ func TestTheTokenFileDACLAdmitsOnlyThisUserSystemAndAdministrators(t *testing.T)
 		}
 		_, e = ReadToken(file)
 		switch {
-		case c.other == "" && e != nil:
+		case c.refusal == "" && e != nil:
 			t.Errorf("%s: refused: %v", c.name, e)
-		case c.other != "" && (e == nil || !strings.Contains(e.Error(), c.other) || !strings.Contains(e.Error(), file)):
-			t.Errorf("%s: want a refusal naming %s and the file, got %v", c.name, c.other, e)
+		case c.refusal != "" && (e == nil || !strings.Contains(e.Error(), c.refusal) || !strings.Contains(e.Error(), c.sid) || !strings.Contains(e.Error(), file)):
+			t.Errorf("%s: want %q naming %s and the file, got %v", c.name, c.refusal, c.sid, e)
 		}
 	}
 }

@@ -10,10 +10,15 @@ const (
 	administratorsSID = "S-1-5-32-544"
 )
 
-// readACL returns the controller's user SID and the SID of every principal
-// the file's DACL grants any access to the file itself. Tests replace it and
-// lookupName (accountName).
+// readACL returns the controller's user SID and every principal the file's
+// DACL grants any access to the file itself; Conditional marks a callback
+// entry, whose condition is not evaluated. Tests replace it and lookupName.
 var readACL, lookupName = fileACL, accountName
+
+type grant struct {
+	SID         string
+	Conditional bool
+}
 
 // wellKnownSID matches SIDs Windows names locally; naming a domain account
 // asks a domain controller and can stall until its RPC timeout.
@@ -26,15 +31,18 @@ func checkTokenACL(path string) error {
 	if e != nil {
 		return fmt.Errorf("Home Assistant token file permissions unreadable: %w", e)
 	}
-	for _, sid := range granted {
-		if sid == user || sid == systemSID || sid == administratorsSID {
+	for _, g := range granted {
+		if g.SID == user || g.SID == systemSID || g.SID == administratorsSID {
 			continue
 		}
-		who := sid
-		if wellKnownSID.MatchString(sid) {
-			if name := lookupName(sid); name != "" {
-				who = name + " (" + sid + ")"
+		who := g.SID
+		if wellKnownSID.MatchString(g.SID) {
+			if name := lookupName(g.SID); name != "" {
+				who = name + " (" + g.SID + ")"
 			}
+		}
+		if g.Conditional {
+			return fmt.Errorf("Home Assistant token file %s has a conditional entry for %s, which the controller does not evaluate; allow only this user, SYSTEM and Administrators", path, who)
 		}
 		return fmt.Errorf("Home Assistant token file %s also grants access to %s; allow only this user, SYSTEM and Administrators", path, who)
 	}

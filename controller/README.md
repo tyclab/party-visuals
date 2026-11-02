@@ -84,7 +84,12 @@ repository. Before reading the file the controller reads its permissions
 than this Windows user, SYSTEM or Administrators: `controller.log` gets one
 line naming the file and that account, and Follow Party reads `not polling:
 … also grants access to <account>`. Deny entries grant nothing and do not
-count; a file without a DACL counts as open to Everyone. The last three keys
+count; a file without a DACL counts as open to Everyone. A conditional entry
+(an allow entry with a condition, such as group membership) for another
+account is refused too, as `… has a conditional entry for <account>, which
+the controller does not evaluate`. The account is named for well-known and
+built-in accounts and given by its SID otherwise, so the check never waits for
+a domain controller. The last three keys
 default to the values shown; `partyPollMs` takes 1000 to 60000. `check`, and
 with it Stage, refuses an http URL, a relative token path, an unreadable or
 empty token file, a token file other accounts can open and a malformed entity

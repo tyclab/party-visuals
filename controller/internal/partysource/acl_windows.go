@@ -19,7 +19,7 @@ const (
 
 const everyoneSID = "S-1-1-0"
 
-func fileACL(path string) (string, []string, error) {
+func fileACL(path string) (string, []grant, error) {
 	user, e := windows.GetCurrentProcessToken().GetTokenUser()
 	if e != nil {
 		return "", nil, e
@@ -31,12 +31,12 @@ func fileACL(path string) (string, []string, error) {
 	dacl, _, e := sd.DACL()
 	if errors.Is(e, windows.ERROR_OBJECT_NOT_FOUND) || (e == nil && dacl == nil) {
 		// A missing or NULL DACL lets everyone in.
-		return user.User.Sid.String(), []string{everyoneSID}, nil
+		return user.User.Sid.String(), []grant{{SID: everyoneSID}}, nil
 	}
 	if e != nil {
 		return "", nil, e
 	}
-	var granted []string
+	var granted []grant
 	for i := uint32(0); i < uint32(dacl.AceCount); i++ {
 		var ace *windows.ACCESS_ALLOWED_ACE
 		if e = windows.GetAce(dacl, i, &ace); e != nil {
@@ -52,7 +52,8 @@ func fileACL(path string) (string, []string, error) {
 		if ace.Mask == 0 || ace.Header.AceFlags&windows.INHERIT_ONLY_ACE != 0 {
 			continue
 		}
-		granted = append(granted, (*windows.SID)(unsafe.Pointer(&ace.SidStart)).String())
+		sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart)).String()
+		granted = append(granted, grant{SID: sid, Conditional: ace.Header.AceType == accessAllowedCallback})
 	}
 	return user.User.Sid.String(), granted, nil
 }
