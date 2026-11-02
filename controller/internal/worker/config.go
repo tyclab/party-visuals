@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 )
 
 type Config struct {
@@ -81,8 +82,8 @@ func Load(path string) (Config, error) {
 	if c.BrowserProfile == "" || c.NodecgRoot == "" || c.LogFile == "" {
 		return c, errors.New("profile, NodeCG root and log path are required")
 	}
-	if local := os.Getenv("LOCALAPPDATA"); local != "" && sameDir(c.BrowserProfile, filepath.Join(local, "Google", "Chrome", "User Data")) {
-		return c, errors.New(`browserProfile must be a dedicated folder, not Chrome's default profile root %LOCALAPPDATA%\Google\Chrome\User Data`)
+	if browserRoot(c.BrowserProfile) {
+		return c, errors.New(`browserProfile must be a dedicated folder, not a browser's own profile folder (a User Data folder in %LOCALAPPDATA%, such as Google\Chrome\User Data)`)
 	}
 	if c.HomeAssistantURL == "" && c.HomeAssistantTokenFile == "" && c.PartyEntity == "" && c.PartyValue == "" && c.PartyPollMs == 0 {
 		return c, nil
@@ -124,4 +125,16 @@ func besideExecutable(script string) error {
 		return fmt.Errorf("workerScript must be in the folder that holds this executable (%s), where the installer copies it", dir)
 	}
 	return nil
+}
+
+// browserRoot reports whether profile is a folder named User Data inside
+// %LOCALAPPDATA%, where Chrome and its other channels, Chromium and Edge
+// keep the operator's own profiles, however the path is spelt.
+func browserRoot(profile string) bool {
+	local := os.Getenv("LOCALAPPDATA")
+	if local == "" {
+		return false
+	}
+	p, l := canonical(profile), canonical(local)
+	return strings.EqualFold(filepath.Base(p), "User Data") && len(p) > len(l) && strings.EqualFold(p[:len(l)], l) && os.IsPathSeparator(p[len(l)])
 }

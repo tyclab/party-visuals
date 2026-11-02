@@ -119,18 +119,46 @@ func TestHomeAssistantSourceIsValidated(t *testing.T) {
 	}
 }
 
-func TestBrowserProfileMustNotBeChromesDefaultProfileRoot(t *testing.T) {
+func TestBrowserProfileMustNotBeABrowsersOwnProfileFolder(t *testing.T) {
 	local := t.TempDir()
 	t.Setenv("LOCALAPPDATA", local)
-	root := filepath.Join(local, "Google", "Chrome", "User Data")
-	for _, profile := range []string{root, strings.ToUpper(root) + string(filepath.Separator) + string(filepath.Separator)} {
-		if _, e := Load(writeConfig(t, map[string]any{"browserProfile": profile})); e == nil || !strings.Contains(e.Error(), "not Chrome's default profile root") {
-			t.Errorf("browserProfile %q: %v", profile, e)
+	sep := string(filepath.Separator)
+	refused := func(profile string) bool {
+		_, e := Load(writeConfig(t, map[string]any{"browserProfile": profile}))
+		return e != nil && strings.Contains(e.Error(), "not a browser's own profile folder")
+	}
+	chrome := filepath.Join(local, "Google", "Chrome", "User Data")
+	for _, profile := range []string{
+		chrome,
+		strings.ToUpper(chrome) + sep + sep,
+		filepath.Join(local, "Google", "Chrome Beta", "User Data"),
+		filepath.Join(local, "Chromium", "User Data"),
+		filepath.Join(local, "Microsoft", "Edge", "User Data"),
+	} {
+		if !refused(profile) {
+			t.Errorf("browserProfile %q accepted", profile)
 		}
 	}
-	for _, profile := range []string{filepath.Join(local, "PartyVisuals", "browser-profile"), filepath.Join(root, "Default"), filepath.Join(local, "Google", "Chrome")} {
-		if _, e := Load(writeConfig(t, map[string]any{"browserProfile": profile})); e != nil {
-			t.Errorf("browserProfile %q: %v", profile, e)
+	for _, profile := range []string{
+		filepath.Join(local, "PartyVisuals", "browser-profile"),
+		filepath.Join(chrome, "Default"),
+		filepath.Join(local, "Google", "Chrome"),
+		filepath.Join(t.TempDir(), "User Data"),
+	} {
+		if refused(profile) {
+			t.Errorf("browserProfile %q refused", profile)
 		}
+	}
+	os.MkdirAll(chrome, 0700)
+	link := filepath.Join(t.TempDir(), "local")
+	if e := os.Symlink(local, link); e != nil {
+		t.Skipf("no symbolic links here: %v", e)
+	}
+	if !refused(filepath.Join(link, "Google", "Chrome", "User Data")) {
+		t.Error("the default root spelt through a link to LOCALAPPDATA was accepted")
+	}
+	t.Setenv("LOCALAPPDATA", link)
+	if !refused(chrome) {
+		t.Error("the default root was accepted while LOCALAPPDATA names it through a link")
 	}
 }

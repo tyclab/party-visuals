@@ -120,10 +120,14 @@ Stop, sleep and the other commands do not sweep. It closes such a browser first 
 keeps the screen it was on, and after 15 s by ending the process, as the
 browser launcher's `-Stop` does. Chrome on any other profile, including the
 normal one, is never touched. To keep it that way, `check`, Stage and the
-controller refuse a `browserProfile` equal to Chrome's default profile root,
-`%LOCALAPPDATA%\Google\Chrome\User Data` (any case, trailing separators
-ignored): the kiosk runs on that folder with remote debugging enabled, and Stop
-and the sweep close Chrome on it. Manual Off stays Off, and Start opens the
+controller refuse a `browserProfile` that is a browser's own profile folder: a
+folder named `User Data` anywhere inside `%LOCALAPPDATA%`, such as
+`Google\Chrome\User Data`, `Google\Chrome Beta\User Data`,
+`Chromium\User Data` or `Microsoft\Edge\User Data`, whichever browser
+`chromeExe` names. Both paths are compared as Windows resolves them, so case,
+trailing separators, 8.3 short names, junctions and links do not matter. The
+kiosk runs on that folder with remote debugging enabled, and Stop and the
+sweep close Chrome on it. Manual Off stays Off, and Start opens the
 controller's own window.
 `controller.log` names each closed window and the tray notifies once for each;
 the diagnostics line shows only the latest, such as `Browser: A browser window
