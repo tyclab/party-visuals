@@ -28,8 +28,8 @@ func grants(sids ...string) []grant {
 
 func TestATokenFileOtherAccountsCanOpenIsRefusedBeforeAnyRequest(t *testing.T) {
 	const users = "S-1-5-32-545"
-	fakeACL(t, grants(testUser, systemSID, administratorsSID, users), nil)
 	r := newRig(t, "example-token", reply{state: "3"})
+	fakeACL(t, grants(testUser, systemSID, administratorsSID, users), nil)
 	if e := r.run(); e == nil {
 		t.Fatal("token accepted")
 	}
@@ -47,8 +47,8 @@ func TestATokenFileOtherAccountsCanOpenIsRefusedBeforeAnyRequest(t *testing.T) {
 }
 
 func TestATokenFileOnlyThisUserSystemAndAdministratorsCanOpenIsUsed(t *testing.T) {
-	fakeACL(t, grants(testUser, systemSID, administratorsSID), nil)
 	r := newRig(t, "example-token", reply{state: "3"})
+	fakeACL(t, grants(testUser, systemSID, administratorsSID), nil)
 	if e := r.run(); e != nil {
 		t.Fatal(e)
 	}
@@ -58,8 +58,8 @@ func TestATokenFileOnlyThisUserSystemAndAdministratorsCanOpenIsUsed(t *testing.T
 }
 
 func TestUnreadableTokenFilePermissionsRefuseTheToken(t *testing.T) {
-	fakeACL(t, nil, errors.New("Access is denied."))
 	r := newRig(t, "example-token", reply{state: "3"})
+	fakeACL(t, nil, errors.New("Access is denied."))
 	if e := r.run(); e == nil || !strings.Contains(e.Error(), "permissions unreadable") {
 		t.Fatalf("run: %v", e)
 	}

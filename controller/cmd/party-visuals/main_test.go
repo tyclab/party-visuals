@@ -72,6 +72,8 @@ func TestCheckValidatesTheHomeAssistantTokenFile(t *testing.T) {
 		t.Fatalf("unconfigured check: %q, %v", out, e)
 	}
 	token := filepath.Join(t.TempDir(), "ha.token")
+	os.WriteFile(token, nil, 0600)
+	ownerOnly(t, token)
 	root := writeRoot(t, map[string]any{"homeAssistantUrl": "https://ha.example.invalid", "homeAssistantTokenFile": token})
 	for _, content := range []string{"", "\n"} {
 		os.WriteFile(token, []byte(content), 0600)

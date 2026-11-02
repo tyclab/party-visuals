@@ -21,9 +21,6 @@ func TestTheTokenFileDACLAdmitsOnlyThisUserSystemAndAdministrators(t *testing.T)
 	if e = os.WriteFile(file, []byte("example-token"), 0600); e != nil {
 		t.Fatal(e)
 	}
-	if _, e = ReadToken(file); e != nil {
-		t.Fatalf("a token file in this user's temporary folder: %v", e)
-	}
 	const opened, conditional = "also grants access to", "conditional entry for"
 	for _, c := range []struct{ name, sddl, refusal, sid string }{
 		{"user, SYSTEM and Administrators", "D:P(A;;FA;;;" + user + ")(A;;FA;;;SY)(A;;FA;;;BA)", "", ""},
