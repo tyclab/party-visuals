@@ -12,8 +12,14 @@ import (
 	"unsafe"
 )
 
-func powerShell() string {
-	return filepath.Join(os.Getenv("SystemRoot"), "System32", "WindowsPowerShell", "v1.0", "powershell.exe")
+// powerShell is Windows PowerShell in the system directory as Windows
+// reports it, never as a SystemRoot variable the environment can redirect.
+func powerShell() (string, error) {
+	system, e := windows.GetSystemDirectory()
+	if e != nil {
+		return "", e
+	}
+	return filepath.Join(system, "WindowsPowerShell", "v1.0", "powershell.exe"), nil
 }
 func hide(c *exec.Cmd) {
 	c.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NO_WINDOW}
