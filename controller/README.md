@@ -185,7 +185,12 @@ Build from this directory with `go build -trimpath -o party-visuals.exe
 
 Stage verifies the hash, validates candidate configuration without launching
 anything, protects local state and exports owned legacy tasks. It leaves the
-active configuration untouched. Existing visuals keep
+active configuration untouched. Stage copies the executable and the worker
+scripts into one release folder (`controller\releases\<hash>`) and points
+`workerScript` there. The controller runs that script with PowerShell's
+execution policy bypassed, so `check`, Stage and the controller refuse a
+`workerScript` that is not in the folder holding the running
+`party-visuals.exe`, naming that folder. Existing visuals keep
 running. Actual host/player values stay in local `controller/config.json`.
 An explicit `-ConfigPath` can replace legacy import. The configuration names
 the existing private NodeCG configuration file; it contains no engine token.

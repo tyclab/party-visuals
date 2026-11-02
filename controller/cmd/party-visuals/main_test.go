@@ -22,17 +22,34 @@ func writeRoot(t *testing.T, extra map[string]any) string {
 	t.Helper()
 	root := t.TempDir()
 	v := map[string]any{"version": 1, "nodecgRoot": root, "browserProfile": filepath.Join(root, "profile"), "logFile": filepath.Join(root, "nodecg.log"), "visualizerUrl": "http://music.example.invalid:8095/#/now-playing?player=test", "controlsUrl": "http://127.0.0.1:9090/bundles/party-visuals/api/state"}
-	for _, name := range []string{"workerScript", "nodeExe", "chromeExe", "helperPath"} {
+	for _, name := range []string{"nodeExe", "chromeExe", "helperPath"} {
 		p := filepath.Join(root, name)
 		os.WriteFile(p, nil, 0600)
 		v[name] = p
 	}
+	v["workerScript"] = besideTestBinary(t, "Run-PartyVisualsSession.ps1")
 	for k, x := range extra {
 		v[k] = x
 	}
 	b, _ := json.Marshal(v)
 	os.WriteFile(filepath.Join(root, "config.json"), b, 0600)
 	return root
+}
+
+// besideTestBinary writes an empty file next to the running test binary,
+// the only folder whose worker script Load accepts.
+func besideTestBinary(t *testing.T, name string) string {
+	t.Helper()
+	exe, e := os.Executable()
+	if e != nil {
+		t.Fatal(e)
+	}
+	p := filepath.Join(filepath.Dir(exe), name)
+	if e = os.WriteFile(p, nil, 0600); e != nil {
+		t.Fatal(e)
+	}
+	t.Cleanup(func() { os.Remove(p) })
+	return p
 }
 func stdout(t *testing.T, f func() error) (string, error) {
 	t.Helper()
@@ -66,6 +83,16 @@ func TestCheckValidatesTheHomeAssistantTokenFile(t *testing.T) {
 	out, e = stdout(t, func() error { return run([]string{"--root", root, "check"}) })
 	if e != nil || !strings.Contains(out, "sensor.house_mode_code") || strings.Contains(out, "example-token") {
 		t.Fatalf("configured check: %q, %v", out, e)
+	}
+}
+
+func TestCheckRefusesAWorkerScriptOutsideTheReleaseFolder(t *testing.T) {
+	elsewhere := filepath.Join(t.TempDir(), "Run-PartyVisualsSession.ps1")
+	os.WriteFile(elsewhere, nil, 0600)
+	root := writeRoot(t, map[string]any{"workerScript": elsewhere})
+	_, e := stdout(t, func() error { return run([]string{"--root", root, "check"}) })
+	if e == nil || !strings.Contains(e.Error(), "workerScript must be in the folder that holds this executable") {
+		t.Fatalf("check: %v", e)
 	}
 }
 

@@ -39,6 +39,9 @@ type Config struct {
 
 var entityID = regexp.MustCompile(`^[a-z0-9_]+\.[a-z0-9_]+$`)
 
+// executable is os.Executable; tests put the release folder elsewhere.
+var executable = os.Executable
+
 func Load(path string) (Config, error) {
 	f, e := os.Open(path)
 	if e != nil {
@@ -61,6 +64,9 @@ func Load(path string) (Config, error) {
 		if s, e := os.Stat(p); e != nil || s.IsDir() {
 			return c, fmt.Errorf("%s is missing", name)
 		}
+	}
+	if e = besideExecutable(c.WorkerScript); e != nil {
+		return c, e
 	}
 	for _, raw := range []string{c.VisualizerURL, c.ControlsURL} {
 		u, e := url.Parse(raw)
@@ -101,4 +107,18 @@ func Load(path string) (Config, error) {
 		return c, errors.New("partyPollMs must be between 1000 and 60000")
 	}
 	return c, nil
+}
+
+// besideExecutable accepts a worker script only in the release folder that
+// holds the running executable, where the installer copies both: the
+// controller runs it with PowerShell's execution policy bypassed.
+func besideExecutable(script string) error {
+	exe, e := executable()
+	if e != nil {
+		return fmt.Errorf("workerScript: cannot locate this executable: %w", e)
+	}
+	if dir := filepath.Dir(exe); !sameDir(filepath.Dir(script), dir) {
+		return fmt.Errorf("workerScript must be in the folder that holds this executable (%s), where the installer copies it", dir)
+	}
+	return nil
 }

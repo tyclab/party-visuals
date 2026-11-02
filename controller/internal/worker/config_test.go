@@ -23,7 +23,47 @@ func writeConfig(t *testing.T, extra map[string]any) string {
 	b, _ := json.Marshal(v)
 	p := filepath.Join(dir, "config.json")
 	os.WriteFile(p, b, 0600)
+	runFrom(t, dir)
 	return p
+}
+
+// runFrom makes dir the release folder, as if party-visuals.exe ran from it.
+func runFrom(t *testing.T, dir string) {
+	saved := executable
+	executable = func() (string, error) { return filepath.Join(dir, "party-visuals.exe"), nil }
+	t.Cleanup(func() { executable = saved })
+}
+
+func TestWorkerScriptMustBeInTheExecutablesFolder(t *testing.T) {
+	root := t.TempDir()
+	release := filepath.Join(root, "release")
+	os.MkdirAll(filepath.Join(release, "scripts"), 0700)
+	const name = "Run-PartyVisualsSession.ps1"
+	for _, dir := range []string{root, release, filepath.Join(release, "scripts")} {
+		os.WriteFile(filepath.Join(dir, name), nil, 0600)
+	}
+	load := func(script string) error {
+		p := writeConfig(t, map[string]any{"workerScript": script})
+		runFrom(t, release)
+		_, e := Load(p)
+		return e
+	}
+	sep := string(filepath.Separator)
+	for what, script := range map[string]string{
+		"the folder above":       filepath.Join(root, name),
+		"a path that climbs out": release + sep + ".." + sep + name,
+		"a subfolder":            filepath.Join(release, "scripts", name),
+	} {
+		if e := load(script); e == nil || !strings.Contains(e.Error(), "workerScript must be in the folder that holds this executable") {
+			t.Errorf("%s: %v", what, e)
+		}
+	}
+	if e := load(filepath.Join(release, name)); e != nil {
+		t.Errorf("the script beside the executable: %v", e)
+	}
+	if e := load(name); e == nil || e.Error() != "workerScript must be absolute" {
+		t.Errorf("a relative workerScript: %v", e)
+	}
 }
 
 func TestConfigWithoutHomeAssistantLeavesFollowPartyUnconfigured(t *testing.T) {
