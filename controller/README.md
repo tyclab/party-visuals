@@ -79,9 +79,15 @@ The URL must be https. The token file holds one Home Assistant long-lived
 access token (profile, Security tab) and nothing else; a UTF-8 byte-order mark
 and surrounding whitespace are ignored. Keep it in the controller directory,
 which only the user and SYSTEM can read, never in `config.json` or this
-repository. The last three keys default to the values shown; `partyPollMs`
-takes 1000 to 60000. `check`, and with it Stage, refuses an http URL, a
-relative token path, an unreadable or empty token file and a malformed entity
+repository. Before reading the file the controller reads its permissions
+(DACL) and refuses the token if any entry grants access to an account other
+than this Windows user, SYSTEM or Administrators: `controller.log` gets one
+line naming the file and that account, and Follow Party reads `not polling:
+… also grants access to <account>`. Deny entries grant nothing and do not
+count; a file without a DACL counts as open to Everyone. The last three keys
+default to the values shown; `partyPollMs` takes 1000 to 60000. `check`, and
+with it Stage, refuses an http URL, a relative token path, an unreadable or
+empty token file, a token file other accounts can open and a malformed entity
 id.
 
 Diagnostics separate screen/helper, Lightshow analysis audio, output eligibility
