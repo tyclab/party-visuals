@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"github.com/tyclab/party-visuals/controller/internal/lifecycle"
 	"github.com/tyclab/party-visuals/controller/internal/owner"
 	"github.com/tyclab/party-visuals/controller/internal/partysource"
@@ -151,5 +152,57 @@ func TestRestoredWindowNoticesLandInControllerLogAndDiagnostics(t *testing.T) {
 	lines := diagnosticLines(worker.Diagnostics{Browser: l.browserNote()}, partysource.Status{})
 	if last := lines[len(lines)-1]; !strings.HasPrefix(last, "Browser: A browser window restored by Windows at sign-in was closed (process 42) at ") {
 		t.Fatalf("diagnostics end with %q", last)
+	}
+}
+
+func TestCommandsAndStatesLandInControllerLog(t *testing.T) {
+	root := t.TempDir()
+	f, e := openLog(root)
+	if e != nil {
+		t.Fatal(e)
+	}
+	l := &controllerLog{Logger: log.New(f, "", log.LstdFlags)}
+	apply := func(c string) error {
+		if c == "party-on" {
+			return errors.New("controller is shutting down")
+		}
+		return nil
+	}
+	server, e := owner.Listen(root, func() any { return statusView{} }, l.command("cli", apply))
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer server.Close()
+	if e = l.command("tray", apply)("start"); e != nil {
+		t.Fatal(e)
+	}
+	for _, args := range [][]string{{"stop"}, {"mode", "follow-party"}, {"quit"}} {
+		if _, e = stdout(t, func() error { return run(append([]string{"--root", root}, args...)) }); e != nil {
+			t.Fatal(e)
+		}
+	}
+	if _, e = stdout(t, func() error { return run([]string{"--root", root, "party", "on"}) }); e == nil {
+		t.Fatal("refused command reported success")
+	}
+	off := lifecycle.Status{Phase: "off", Intent: lifecycle.Intent{Version: 1, Mode: "manual", ManualOff: true}}
+	l.state(off)
+	l.state(off)
+	refused := off
+	refused.Phase, refused.Reason = "attention", worker.RestoredOpen
+	l.state(refused)
+	f.Close()
+	b := readLog(t, root)
+	for _, want := range []string{
+		"command start from tray: accepted\n",
+		"command stop from cli: accepted\n",
+		"command follow-party from cli: accepted\n",
+		"command quit from cli: accepted\n",
+		"command party-on from cli: refused: controller is shutting down\n",
+		"phase off (mode manual, Manual Off)\n",
+		"phase attention (mode manual, Manual Off): A browser window restored by Windows at sign-in is open; close it before Start\n",
+	} {
+		if strings.Count(b, want) != 1 {
+			t.Errorf("controller.log lacks one %q:\n%s", want, b)
+		}
 	}
 }

@@ -219,9 +219,10 @@ func app(root string) error {
 			return m.Apply(command)
 		}
 	}
+	trayCommand := logger.command("tray", command)
 	t, e = tray.New(icon(), tray.Options{Name: "Party Visuals", Identifier: "io.tyclab.partyvisuals.controller", Tooltip: "Party Visuals", OnClick: func(c string) {
 		go func() {
-			if e := command(c); e != nil {
+			if e := trayCommand(c); e != nil {
 				t.Notify("Party Visuals", e.Error())
 			}
 		}()
@@ -260,6 +261,7 @@ func app(root string) error {
 		}
 	}
 	m, e = lifecycle.New(lifecycle.FileStore{Path: filepath.Join(root, "intent.json")}, worker.Backend{Config: c, ConfigPath: filepath.Join(root, "config.json"), Notice: notice}, func(s lifecycle.Status) {
+		logger.state(s)
 		source.SetActive(s.Intent.Mode == "follow-party")
 		refresh(s)
 	})
@@ -267,7 +269,7 @@ func app(root string) error {
 		return e
 	}
 	defer m.Close()
-	server, e := owner.Listen(root, status, command)
+	server, e := owner.Listen(root, status, logger.command("cli", command))
 	if e != nil {
 		return e
 	}
@@ -331,12 +333,43 @@ func diagnosticLines(d worker.Diagnostics, p partysource.Status) []string {
 	return lines
 }
 
-// controllerLog writes controller.log, including windows Windows restored at
-// sign-in.
+// controllerLog writes controller.log: tray and CLI commands with their
+// result, state changes, and windows Windows restored at sign-in.
 type controllerLog struct {
 	*log.Logger
 	mu      sync.Mutex
+	last    lifecycle.Status
+	logged  bool
 	browser string
+}
+
+func (l *controllerLog) command(source string, run func(string) error) func(string) error {
+	return func(command string) error {
+		e := run(command)
+		if e != nil {
+			l.Printf("command %s from %s: refused: %v", command, source, e)
+		} else {
+			l.Printf("command %s from %s: accepted", command, source)
+		}
+		return e
+	}
+}
+func (l *controllerLog) state(s lifecycle.Status) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.logged && s.Phase == l.last.Phase && s.Reason == l.last.Reason && s.Intent == l.last.Intent {
+		return
+	}
+	l.logged, l.last = true, s
+	intent := "Manual Off"
+	if s.Intent.Requested && !s.Intent.ManualOff {
+		intent = "Start requested"
+	}
+	line := fmt.Sprintf("phase %s (mode %s, %s)", s.Phase, s.Intent.Mode, intent)
+	if s.Reason != "" {
+		line += ": " + s.Reason
+	}
+	l.Print(line)
 }
 
 // restored records a notice about a window Windows restored at sign-in and
