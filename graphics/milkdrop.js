@@ -1,7 +1,8 @@
 /**
  * The live-audio visualizer: a MilkDrop picture drawn from the lightshow's live input, which this
  * bundle's extension relays (api/samples). With no sound to draw it fades out and says what it waits
- * for; the browser helper reads that fade as idle and releases the lights it streams to.
+ * for; the browser helper reads that fade as idle and releases the lights it streams to. What it asks
+ * for, keeps and may draw is shared/samples.js's LivePageFeed, the code the timing test runs.
  */
 (function () {
   'use strict';
@@ -12,36 +13,37 @@
   const status = view.querySelector('[role="status"]');
   const graphics = (window.nodecg && window.nodecg.bundleConfig && window.nodecg.bundleConfig.graphics) || {};
   const presetSeconds = Number.isFinite(graphics.presetSeconds) ? Math.max(10, Math.min(600, graphics.presetSeconds)) : PV.PRESET_SECONDS;
-  const FADE_MS = 1000;
-  const SAY = { nodecg: 'No connection to NodeCG', lightshow: 'No connection to the lightshow', 'live-input': 'The lightshow has no live input',
-    audio: 'No audio from the lightshow', silence: 'Silence', webgl: 'This browser cannot draw the visualizer (no WebGL 2)' };
+  const FADE_MS = 1000, RETRY_MS = 1000, AGE_EVERY_MS = 1000;
+  // A lost graphics context is not restored in place: the page loads again, at once or when it gets its context back.
+  const RELOAD_AFTER_LOSS_MS = 3000, RELOAD_WITHOUT_WEBGL_MS = 30_000;
+  const SAY = { webgl: 'This browser cannot draw the visualizer (no WebGL 2)', context: 'The graphics context was lost; reloading',
+    nodecg: 'No connection to NodeCG', busy: 'Too many live-audio pages are open', endpoint: 'The samples endpoint refused this page',
+    lightshow: 'No connection to the lightshow', 'live-input': 'The lightshow has no live input', audio: 'No audio from the lightshow', silence: 'Silence' };
 
-  const ring = new PV.SampleRing();
-  let wait = 'audio', link = true;
-
-  function decode(text) {
-    const raw = atob(text || ''), out = new Int16Array(raw.length >> 1);
-    for (let i = 0; i < out.length; i++) out[i] = ((raw.charCodeAt(2 * i) | (raw.charCodeAt(2 * i + 1) << 8)) << 16) >> 16;
-    return out;
-  }
+  const feed = new PV.LivePageFeed();
+  let wait = 'audio', link = null, lost = false;
+  const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
   async function pull() {
     for (;;) {
+      const asked = performance.now(), abort = new AbortController(), timer = setTimeout(() => abort.abort(), PV.PULL_TIMEOUT_MS);
       try {
-        const response = await fetch(`../api/samples${ring.g === null ? '' : `?g=${ring.g}&after=${ring.end}`}`, { cache: 'no-store' });
-        if (!response.ok) throw new Error(`HTTP ${response.status}`);
-        const body = await response.json();
-        link = true;
-        wait = PV.WAITS.includes(body.wait) ? body.wait : null;
-        const samples = decode(body.data);
-        // Behind its quickest delivery by the extension's count plus the trip here, on this machine's clock.
-        if (samples.length && Number.isFinite(body.ageMs)) {
-          ring.take({ g: body.g, end: body.end, rate: body.rate, samples }, performance.now(), body.ageMs + Math.max(0, Date.now() - body.sentAt));
+        const response = await fetch(`../api/samples${feed.query()}`, { cache: 'no-store', signal: abort.signal });
+        if (!response.ok) link = response.status === 503 ? 'busy' : 'endpoint';
+        else {
+          const body = await response.json().catch(() => null);
+          link = body && typeof body === 'object' ? null : 'endpoint';
+          if (!link) {
+            wait = PV.WAITS.includes(body.wait) ? body.wait : null;
+            feed.take(body, performance.now(), asked);
+          }
         }
       } catch {
-        link = false;
-        await new Promise((resolve) => setTimeout(resolve, 1000));
+        link = 'nodecg';
+      } finally {
+        clearTimeout(timer);
       }
+      if (link) await pause(RETRY_MS);
     }
   }
 
@@ -65,6 +67,16 @@
     }
   }
 
+  canvas.addEventListener('webglcontextlost', (event) => {
+    event.preventDefault();
+    lost = true;
+    // Hidden at once, not faded: the helper must not stream a blank canvas to the lights.
+    layer.style.transition = 'none';
+    layer.style.opacity = '0';
+    setTimeout(() => window.location.reload(), RELOAD_AFTER_LOSS_MS);
+  });
+  canvas.addEventListener('webglcontextrestored', () => window.location.reload());
+
   const visualizer = createVisualizer();
   const presets = (window.butterchurnPresets && window.butterchurnPresets.getPresets()) || {};
   const cycle = new PV.PresetCycle(Object.keys(presets), { intervalMs: presetSeconds * 1000 });
@@ -74,25 +86,34 @@
     }
   }
   if (visualizer) nextPreset(0);
-  else canvas.width = canvas.height = 0;
+  else {
+    canvas.width = canvas.height = 0;
+    setTimeout(() => window.location.reload(), RELOAD_WITHOUT_WEBGL_MS);
+  }
 
   const bytes = new Uint8Array(1024), silence = new Uint8Array(1024).fill(128);
-  let last = performance.now(), hiddenAt = -Infinity, said;
+  let last = performance.now(), hiddenAt = -Infinity, agedAt = -Infinity, said;
   function frame(now) {
     requestAnimationFrame(frame);
-    const reason = !visualizer ? 'webgl' : !link ? 'nodecg' : wait, shown = reason === null, dt = now - last;
+    const reason = !visualizer ? 'webgl' : lost ? 'context' : link || wait, shown = reason === null, dt = now - last;
     last = now;
     if (reason !== said) {
       said = reason;
       status.textContent = reason ? SAY[reason] : '';
       if (reason) view.setAttribute('data-party-wait', reason); else view.removeAttribute('data-party-wait');
-      layer.style.opacity = shown ? '1' : '0';
+      if (!lost) layer.style.opacity = shown ? '1' : '0';
       if (!shown) hiddenAt = now;
     }
-    if (!visualizer || (!shown && now - hiddenAt > FADE_MS)) return;
+    if (now - agedAt >= AGE_EVERY_MS) {
+      agedAt = now;
+      const ages = feed.ageStats(now);
+      if (ages) view.setAttribute('data-party-age', `${Math.round(ages.medianMs)},${Math.round(ages.worstMs)}`);
+      else view.removeAttribute('data-party-age');
+    }
+    if (!visualizer || lost || (!shown && now - hiddenAt > FADE_MS)) return;
     if (size()) visualizer.setRendererSize(canvas.width, canvas.height);
     if (shown && cycle.advance(dt)) nextPreset(PV.BLEND_SECONDS);
-    const audio = shown && ring.ageMs(now) <= PV.MAX_AGE_MS ? PV.timeBytes(ring.since(-Infinity, 512).samples, bytes) : silence;
+    const audio = (shown && feed.window(now, bytes, Date.now())) || silence;
     visualizer.render({ audioLevels: { timeByteArray: audio, timeByteArrayL: audio, timeByteArrayR: audio } });
   }
 
