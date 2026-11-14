@@ -613,7 +613,10 @@ the machine. `test/page.test.js` drives the live-audio page in headless Chromium
 the headless shell has no WebGL 2 (some Nix builds), run it with
 `PARTY_VISUALS_BROWSER_CHANNEL=chromium` and `PARTY_VISUALS_BROWSER_ARGS` holding the
 flags that give that Chromium WebGL, such as
-`--use-gl=angle --use-angle=vulkan --enable-features=Vulkan --ignore-gpu-blocklist`. `shared/` is loaded both by the extension and, as plain scripts, by the graphics.
+`--use-gl=angle --use-angle=vulkan --enable-features=Vulkan --ignore-gpu-blocklist`. On CI the
+test relies on software WebGL 2 in the headless Chromium of the pinned `playwright-core`, so
+a bump of `playwright-core` has to be checked against this test. `shared/` is loaded both by
+the extension and, as plain scripts, by the graphics.
 
 On Windows, `powershell -NoProfile -ExecutionPolicy Bypass -File test\install.test.ps1`
 checks the install script in a folder under `%TEMP%`: the token file, the configuration
