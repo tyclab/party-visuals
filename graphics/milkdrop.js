@@ -21,7 +21,14 @@
     lightshow: 'No connection to the lightshow', 'live-input': 'The lightshow has no live input', audio: 'No audio from the lightshow', silence: 'Silence' };
 
   const feed = new PV.LivePageFeed();
-  let wait = 'audio', link = null, lost = false;
+  let wait = 'audio', link = null, lost = false, said, hiddenAt = -Infinity;
+  function tell(reason, now) {
+    said = reason;
+    status.textContent = reason ? SAY[reason] : '';
+    if (reason) view.setAttribute('data-party-wait', reason); else view.removeAttribute('data-party-wait');
+    if (!lost) layer.style.opacity = reason ? '0' : '1';
+    if (reason) hiddenAt = now;
+  }
   const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
   async function pull() {
@@ -70,9 +77,10 @@
   canvas.addEventListener('webglcontextlost', (event) => {
     event.preventDefault();
     lost = true;
-    // Hidden at once, not faded: the helper must not stream a blank canvas to the lights.
+    // Hidden at once, not faded, with its reason: the helper must not stream a blank canvas to the lights.
     layer.style.transition = 'none';
     layer.style.opacity = '0';
+    tell('context', performance.now());
     setTimeout(() => window.location.reload(), RELOAD_AFTER_LOSS_MS);
   });
   canvas.addEventListener('webglcontextrestored', () => window.location.reload());
@@ -92,18 +100,12 @@
   }
 
   const bytes = new Uint8Array(1024), silence = new Uint8Array(1024).fill(128);
-  let last = performance.now(), hiddenAt = -Infinity, agedAt = -Infinity, said;
+  let last = performance.now(), agedAt = -Infinity;
   function frame(now) {
     requestAnimationFrame(frame);
     const reason = !visualizer ? 'webgl' : lost ? 'context' : link || wait, shown = reason === null, dt = now - last;
     last = now;
-    if (reason !== said) {
-      said = reason;
-      status.textContent = reason ? SAY[reason] : '';
-      if (reason) view.setAttribute('data-party-wait', reason); else view.removeAttribute('data-party-wait');
-      if (!lost) layer.style.opacity = shown ? '1' : '0';
-      if (!shown) hiddenAt = now;
-    }
+    if (reason !== said) tell(reason, now);
     if (now - agedAt >= AGE_EVERY_MS) {
       agedAt = now;
       const ages = feed.ageStats(now);

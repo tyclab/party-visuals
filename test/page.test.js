@@ -168,8 +168,8 @@ test('the live-audio page draws from the live input, goes calm on silence, survi
   // A lost graphics context: hidden at once with its reason, then the page loads again by itself.
   const reloaded = page.waitForEvent('load', { timeout: 10_000 });
   await page.evaluate(() => document.querySelector('[data-party-visualizer-canvas]').getContext('webgl2').getExtension('WEBGL_lose_context').loseContext());
-  const lost = await look();
-  assert.deepEqual([lost.wait, lost.opacity], ['context', 0], 'no blank canvas left showing for the lights');
+  const lost = await until(async () => { const now = await look(); return now.wait === 'context' && now; }, 'the lost context said', 1000);
+  assert.equal(lost.opacity, 0, 'hidden as the reason shows, not faded: no blank canvas left showing for the lights');
   await reloaded;
   await until(async () => { const now = await look(); return now.wait === null && now.opacity === 1 && now; }, 'the picture back after the reload');
   await loudAfter(0);
