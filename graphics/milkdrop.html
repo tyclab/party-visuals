@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Live-audio visualizer · TycStation Lightshow</title>
+  <link rel="stylesheet" href="milkdrop.css">
+</head>
+<body>
+  <div class="live" data-party-visualizer data-party-wait="audio">
+    <div class="live__layer" data-party-visualizer-layer>
+      <canvas class="live__canvas" data-party-visualizer-canvas></canvas>
+    </div>
+    <p class="live__status" role="status"></p>
+  </div>
+  <script src="../shared/samples.js"></script>
+  <script src="../shared/presets.js"></script>
+  <script src="../node_modules/butterchurn/lib/butterchurn.min.js"></script>
+  <script src="../node_modules/butterchurn-presets/lib/butterchurnPresets.min.js"></script>
+  <script src="milkdrop.js"></script>
+</body>
+</html>

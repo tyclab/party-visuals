@@ -1,7 +1,7 @@
 {
   "name": "party-visuals",
   "version": "0.1.0",
-  "description": "TycStation Lightshow party visuals: a NodeCG bundle with a beat-synced colour wash and a pulsing bar that keep time with the engine, run beside EclipseGraphics.",
+  "description": "TycStation Lightshow party visuals: a NodeCG bundle with a beat-synced colour wash, a pulsing bar and a MilkDrop visualizer drawn from the engine's live input, run beside EclipseGraphics.",
   "private": true,
   "license": "MIT",
   "homepage": "https://github.com/tyclab/party-visuals",
@@ -16,6 +16,8 @@
     "test": "node --test \"test/*.test.js\""
   },
   "dependencies": {
+    "butterchurn": "2.6.7",
+    "butterchurn-presets": "2.4.7",
     "socket.io-client": "^4.8.3"
   },
   "devDependencies": {
@@ -41,6 +43,12 @@
       },
       {
         "file": "bar.html",
+        "width": 1920,
+        "height": 1080,
+        "singleInstance": false
+      },
+      {
+        "file": "milkdrop.html",
         "width": 1920,
         "height": 1080,
         "singleInstance": false
