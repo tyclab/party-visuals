@@ -59,7 +59,7 @@ async function startExtension(t, show) {
 const packet = (g, end, values) => {
   const data = Buffer.alloc(values.length * 2);
   values.forEach((v, i) => data.writeInt16LE(v, 2 * i));
-  return { g, end, rate: 22050, data };
+  return { g, end, rate: 22050, at: 1_800_000_000_000, data };
 };
 const decode = (body) => {
   const raw = Buffer.from(body.data, 'base64');
@@ -77,20 +77,21 @@ test('the extension subscribes to the samples while a page pulls and answers eac
   const first = pull();
   await until(() => show.sampleSubscribers() === 1, 'the samples subscription');
   const started = Date.now();
-  show.samples(packet(4, 3000, [1000, -2000, 3000]));
+  show.block(packet(4, 3000, [1000, -2000, 3000]));
   const answer = await first;
   assert.equal(answer.status, 200);
   const body = JSON.parse(answer.text);
-  assert.deepEqual([body.g, body.from, body.end, body.rate, body.wait], [4, 2997, 3000, 22050, null]);
+  assert.deepEqual([body.g, body.from, body.end, body.rate, body.wait, body.at], [4, 2997, 3000, 22050, null, 1_800_000_000_000]);
   assert.deepEqual(decode(body), [1000, -2000, 3000]);
   assert.ok(body.ageMs >= 0 && body.ageMs < 100);
-  await until(() => show.seen.acks === 1, 'the acknowledgement');
+  assert.ok(body.heldMs > 0, 'it waited here for the samples, and says how long');
+  await until(() => show.relay.seen.acks === 1, 'the acknowledgement');
 
   const second = pull(`?g=4&after=${body.end}`);
   await new Promise((resolve) => setTimeout(resolve, 50));
   // On time: as far on in the stream as on the clock.
   const end = 3000 + Math.round(((Date.now() - started) / 1000) * 22050);
-  show.samples(packet(4, end, [7, 8]));
+  show.block(packet(4, end, [7, 8]));
   const next = JSON.parse((await second).text);
   assert.deepEqual([next.from, next.end, decode(next)], [end - 2, end, [7, 8]], 'only what the page did not have');
 
@@ -156,6 +157,35 @@ test('the page waits for the lightshow, its live input, its audio, and sound', (
   }
   h.advance(1001);
   assert.equal(h.feed.wait(h.feed.now()), 'audio', 'no samples for a second');
+});
+
+test('a lightshow that restarts and reuses the stream\'s name starts a new stream here, and a page asking past it is answered from its start', () => {
+  const h = feedOn();
+  h.feed.receive(packet(1, 1_000_000, Array(256).fill(4000)));
+  h.advance(5000);
+  h.pull({ g: 1, after: 1_000_000 });
+  h.feed.receive(packet(1, 256, Array(256).fill(4000)));
+  assert.deepEqual([h.feed.ring.start, h.feed.ring.end], [0, 256], 'the count from zero is a new stream');
+  assert.ok(h.feed.ring.ageMs(h.feed.now()) < 100, 'and its arrivals are measured afresh');
+  const [held] = h.answers.splice(0);
+  assert.deepEqual([held.from, held.end], [0, 256], 'the page that was waiting gets the new stream');
+  h.pull({ g: 1, after: 1_000_000 });
+  assert.deepEqual(decode(h.answers[0]).length, 256, 'a position this stream has not reached: from its start');
+});
+
+test('arrivals are timed on a monotonic clock: a step of the wall clock makes no packet late', (t) => {
+  const real = Date.now;
+  t.after(() => { Date.now = real; });
+  const client = { status: { status: 'connected', via: 'socket' }, live: () => ({ listening: true }), wantSamples() {} };
+  const feed = new SampleFeed({ client });
+  const started = performance.now();
+  feed.receive(packet(1, 22050, Array(256).fill(4000)));
+  Date.now = () => real() + 3_600_000;
+  const end = 22050 + Math.round(((performance.now() - started) / 1000) * 22050) + 256;
+  feed.receive(packet(1, end, Array(256).fill(4000)));
+  let body;
+  feed.pull({}, (answer) => { body = answer; });
+  assert.ok(body.ageMs < 100, `${body.ageMs} ms behind after the wall clock jumped an hour`);
 });
 
 test('packets that are not whole 16-bit samples are not taken, and a page asking past them gets no stale data', () => {

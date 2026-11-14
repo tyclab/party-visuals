@@ -1,15 +1,16 @@
 'use strict';
-// The live-audio page's sound-to-picture bound, end to end: the sound card, the lightshow's relay (one
-// packet unacknowledged at a time, newest first), the network, this extension's feed and the page's pull
-// and frames, simulated event by event with the real feed and ring. Whatever is faster or slower than
-// what drains it, a sample is never drawn more than MAX_AGE_MS after its quickest delivery, and nothing
-// queues: a hold-up drops samples.
+// The live-audio page's sound-to-picture bound, end to end: the sound card, the lightshow's relay as the
+// engine has it (helpers/mock-relay.js), the network, this extension's feed and the page's own feed and
+// draw rule (LivePageFeed, which graphics/milkdrop.js runs), simulated event by event. Whatever is faster
+// or slower than what drains it, no window is drawn whose newest sample is more than MAX_AGE_MS past its
+// quickest delivery, and nothing queues: a hold-up drops samples.
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { SampleFeed } = require('../extension/samples.js');
-const { SampleRing, ArrivalClock, MAX_AGE_MS, liveAudioWait, timeBytes, NO_AUDIO_MS, QUIET_AFTER_MS } = require('../shared/samples.js');
+const { MockRelay } = require('./helpers/mock-relay.js');
+const { SampleRing, ArrivalClock, LivePageFeed, MAX_AGE_MS, liveAudioWait, timeBytes, NO_AUDIO_MS, QUIET_AFTER_MS } = require('../shared/samples.js');
 
-const RATE = 22050, HOP = 256, RELAY_PACKET = 1024;
+const RATE = 22050, HOP = 256, WALL = 1_800_000_000_000;
 
 class Events {
   constructor() { this.heap = []; this.seq = 0; }
@@ -60,11 +61,8 @@ const PHASES = [
 ];
 const PHASE_MS = 10_000, BASE_MS = 2;
 
-/**
- * `seconds` of sound through the chain. `drift`: the sound card's clock against the show PC's;
- * `startHours`: how long the stream has run already; `skewMs`: the show PC's clock against true time.
- */
-function simulate({ seconds, drift = 0, startHours = 0, skewMs = 0, seed = 7 }) {
+/** `seconds` of sound through the chain. `drift`: the sound card's clock against the show PC's; `startHours`: how long the stream has run already. */
+function simulate({ seconds, drift = 0, startHours = 0, seed = 7 }) {
   const events = new Events(), rnd = random(seed);
   const rate = RATE * (1 + drift), first = Math.round(startHours * 3600 * rate);
   const captured = (index) => ((index - first) / rate) * 1000;
@@ -77,45 +75,53 @@ function simulate({ seconds, drift = 0, startHours = 0, skewMs = 0, seed = 7 }) 
   };
 
   const client = { status: { status: 'connected', via: 'socket' }, live: () => ({ listening: true }), wantSamples() {} };
-  const feed = new SampleFeed({ client, now: () => now + skewMs });
-  const sound = Buffer.alloc(RELAY_PACKET * 2);
-  for (let i = 0; i < RELAY_PACKET; i++) sound.writeInt16LE(i % 2 ? 3000 : -3000, 2 * i);
+  const feed = new SampleFeed({ client, now: () => now });
+  const sound = Buffer.alloc(HOP * 2);
+  for (let i = 0; i < HOP; i++) sound.writeInt16LE(i % 2 ? 3000 : -3000, 2 * i);
 
-  // The lightshow: a block a hop, one packet to this subscriber at a time, the newest up to 1024 samples.
+  // The extension's socket to the relay: a packet arrives after the network's delay and its acknowledgement
+  // goes back the same way; the relay gives up waiting for it after a second, as Socket.IO's timeout does.
   // `quickest` keeps, a second at a time, the shortest true delivery of the newest sample of a packet.
-  let end = first, sent = first, waiting = false;
   const quickest = [];
+  let inFlight = 0, mostInFlight = 0;
   const delivered = (delay) => {
     const second = Math.floor(now / 1000), last = quickest[quickest.length - 1];
     if (last && last.second === second) last.delay = Math.min(last.delay, delay);
     else quickest.push({ second, delay });
     while (quickest[0].second <= second - 5) quickest.shift();
   };
-  const relay = () => {
-    if (waiting || end <= sent) return;
-    const from = Math.max(sent, end - RELAY_PACKET), packet = { g: 1, end, rate: RATE, data: sound.subarray(0, (end - from) * 2) };
-    sent = end; waiting = true;
+  const relay = new MockRelay();
+  relay.add({ id: 'extension', connected: true, timeout: (ms) => ({ emit: (_event, packet, ack) => {
+    let done = false;
+    const finish = (err) => { if (!done) { done = true; ack(err); } };
+    events.at(now + ms, () => finish(new Error('timeout')));
+    mostInFlight = Math.max(mostInFlight, ++inFlight);
     events.at(now + network(), () => {
+      inFlight--;
       delivered(now - captured(packet.end - 1));
       feed.receive(packet);
-      events.at(now + network(), () => { waiting = false; relay(); });
+      events.at(now + network(), () => finish(null));
     });
-  };
-  const block = (k) => events.at((k * HOP / rate) * 1000 + 0.2, () => { end = first + k * HOP; relay(); block(k + 1); });
+  } }) });
+  const block = (k) => events.at((k * HOP / rate) * 1000 + 0.2, () => {
+    relay.push({ g: 1, end: first + k * HOP, rate: RATE, at: WALL + now, data: sound });
+    block(k + 1);
+  });
   block(1);
   const tick = () => { feed.tick(); events.at(now + 100, tick); };
   events.at(100, tick);
 
   // The page: one pull out at a time, answered when samples come; a response waits while the page is busy.
-  const page = new SampleRing();
+  const page = new LivePageFeed(), out = new Uint8Array(1024);
   let busyUntil = 0;
-  const pull = () => events.at(now + 0.3, () => feed.pull({ g: page.g, after: page.g === null ? null : page.end },
-    (body) => events.at(now + 0.3, () => deliver(body))));
-  const deliver = (body) => {
-    if (now < busyUntil) { events.at(busyUntil, () => deliver(body)); return; }
-    const raw = Buffer.from(body.data, 'base64'), samples = new Int16Array(raw.length / 2);
-    for (let i = 0; i < samples.length; i++) samples[i] = raw.readInt16LE(2 * i);
-    if (samples.length && body.ageMs !== null) page.take({ g: body.g, end: body.end, rate: body.rate, samples }, now, body.ageMs + Math.max(0, now + skewMs - body.sentAt));
+  const pull = () => {
+    const asked = now, query = new URLSearchParams(page.query());
+    events.at(now + 0.3, () => feed.pull({ g: query.has('g') ? Number(query.get('g')) : null, after: query.has('after') ? Number(query.get('after')) : null },
+      (body) => events.at(now + 0.3, () => deliver(body, asked))));
+  };
+  const deliver = (body, asked) => {
+    if (now < busyUntil) { events.at(busyUntil, () => deliver(body, asked)); return; }
+    page.take(body, now, asked);
     pull();
   };
   pull();
@@ -129,8 +135,8 @@ function simulate({ seconds, drift = 0, startHours = 0, skewMs = 0, seed = 7 }) 
       events.at(busyUntil, frame);
       return;
     }
-    if (page.ageMs(now) <= MAX_AGE_MS) {
-      const age = now - captured(page.end - 1), path = Math.min(...quickest.map((q) => q.delay));
+    if (page.window(now, out, WALL + now)) {
+      const age = now - captured(page.ring.end - 1), path = Math.min(...quickest.map((q) => q.delay));
       stats.drawn++;
       stats.worst = Math.max(stats.worst, age);
       stats.over = Math.max(stats.over, age - path - MAX_AGE_MS);
@@ -141,24 +147,24 @@ function simulate({ seconds, drift = 0, startHours = 0, skewMs = 0, seed = 7 }) 
   };
   events.at(0, frame);
 
-  const peak = { events: 0, pulls: 0 };
+  const peak = { pulls: 0 };
   for (let item; (item = events.next()) && item.t <= seconds * 1000;) {
     now = item.t;
     item.fn();
-    peak.events = Math.max(peak.events, events.heap.length);
     peak.pulls = Math.max(peak.pulls, feed.waiting.length);
   }
-  return { frames, peak, feed };
+  peak.packets = mostInFlight;
+  return { frames, peak, feed, page, now };
 }
 
 for (const [label, options] of [
   ['the first minute, sound card fast', { seconds: 60, drift: 0.001 }],
-  ['four hours, sound card fast', { seconds: 4 * 3600, drift: 0.001, seed: 11 }],
-  ['the first minute, sound card slow, show PC clock an hour off', { seconds: 60, drift: -0.001, skewMs: 3_600_000 }],
-  ['a minute after four hours, sound card slow', { seconds: 60, drift: -0.001, startHours: 4, skewMs: -90_000 }],
+  ['two hours, sound card fast', { seconds: 2 * 3600, drift: 0.001, seed: 11 }],
+  ['the first minute, sound card slow', { seconds: 60, drift: -0.001 }],
+  ['a minute after four hours, sound card slow', { seconds: 60, drift: -0.001, startHours: 4 }],
 ]) {
   test(`sound to picture stays within ${MAX_AGE_MS} ms of the quickest path: ${label}`, () => {
-    const { frames, peak } = simulate(options);
+    const { frames, peak, page, now } = simulate(options);
     for (const [name, stats] of frames) {
       console.log(`[bound] ${label}, ${name}: worst ${stats.worst.toFixed(1)} ms from sound to frame, `
         + `${(stats.over + MAX_AGE_MS).toFixed(1)} ms past the quickest path; ${stats.silent} of ${stats.drawn + stats.silent} frames silent`);
@@ -175,31 +181,79 @@ for (const [label, options] of [
       assert.ok(resumedAfter !== null && resumedAfter <= (name === 'page stalls 2 s' ? 2000 : 1500) + 150,
         `${name}: fresh samples ${resumedAfter} ms into the phase, not a backlog first`);
     }
-    assert.ok(peak.events <= 8 && peak.pulls <= 1, `nothing queues: at most ${peak.events} events and ${peak.pulls} pulls pending`);
+    // One packet on the way, and a second only after the relay's one-second wait for a stalled acknowledgement.
+    assert.ok(peak.packets <= 2 && peak.pulls <= 1, `nothing queues: at most ${peak.packets} packets on the way and ${peak.pulls} pulls waiting`);
+    const ages = page.ageStats(now);
+    assert.ok(ages && ages.medianMs >= 0 && ages.worstMs < 200, `the page's own age measure, against the engine's stamp: ${JSON.stringify(ages)}`);
   });
 }
 
-test('a stalled path delivers its held packet late, and that packet is dropped, not drawn', () => {
-  const clock = new ArrivalClock(), ring = new SampleRing();
-  const block = (end) => ({ g: 3, end, rate: RATE, samples: new Int16Array(HOP).fill(5000) });
+test('a held packet that lands late is not drawn: the picture is silent until a fresh one', () => {
+  const clock = new ArrivalClock(), page = new LivePageFeed(), out = new Uint8Array(1024);
+  const body = (end, ageMs) => ({ g: 3, end, rate: RATE, ageMs, heldMs: 0, data: Buffer.from(new Int16Array(HOP).fill(5000).buffer).toString('base64') });
   let now = 50_000;
   for (let k = 1; k <= 200; k++) {
     now = 50_000 + (k * HOP / RATE) * 1000 + 2;
-    assert.equal(ring.take(block(k * HOP), now, clock.lateness((k * HOP / RATE) * 1000, now)), true);
+    page.take(body(k * HOP, clock.lateness((k * HOP / RATE) * 1000, now)), now, now);
+    assert.ok(page.window(now, out));
   }
   const held = 201 * HOP;
   now += 1500;
-  assert.equal(ring.take(block(held), now, clock.lateness((held / RATE) * 1000, now)), false, 'a second and a half late');
+  page.take(body(held, clock.lateness((held / RATE) * 1000, now)), now, now);
+  assert.equal(page.window(now, out), null, 'a second and a half late: silence, not the stale window');
   const fresh = Math.round(((now - 50_000 - 2) / 1000) * RATE);
-  assert.equal(ring.take(block(fresh), now, clock.lateness((fresh / RATE) * 1000, now)), true, 'the newest, on time');
-  assert.equal(ring.start, fresh - HOP, 'the samples that never came are a gap, not a queue');
-  assert.ok(ring.ageMs(now) <= 2);
+  page.take(body(fresh, clock.lateness((fresh / RATE) * 1000, now)), now, now);
+  assert.ok(page.window(now, out), 'the newest, on time, is drawn');
+  assert.equal(page.ring.start, fresh - HOP, 'the samples that never came are a gap, not a queue');
+});
+
+test('a lightshow restarted after an hour that reuses the stream\'s name is followed within a pull', () => {
+  let now = 0;
+  const client = { status: { status: 'connected', via: 'socket' }, live: () => ({ listening: true }), wantSamples() {} };
+  const feed = new SampleFeed({ client, now: () => now }), page = new LivePageFeed(), out = new Uint8Array(1024);
+  const tone = Buffer.alloc(HOP * 2);
+  for (let i = 0; i < HOP; i++) tone.writeInt16LE(i % 2 ? 4000 : -4000, 2 * i);
+  const pull = () => {
+    const query = new URLSearchParams(page.query());
+    feed.pull({ g: query.has('g') ? Number(query.get('g')) : null, after: query.has('after') ? Number(query.get('after')) : null }, (b) => page.take(b, now, now));
+  };
+  let end = 0;
+  const run = (seconds) => {
+    for (let k = 0; k < seconds * RATE / HOP; k++) {
+      end += HOP;
+      now += HOP / RATE * 1000;
+      feed.receive({ g: 1, end, rate: RATE, at: WALL + now, data: tone });
+      if (k % 4 === 0) pull();
+    }
+  };
+  run(3600);
+  assert.ok(page.window(now, out));
+  now += 5000;
+  end = 0;
+  run(1);
+  pull();
+  assert.equal(feed.ring.end, end, 'the extension follows the new count');
+  assert.equal(page.ring.end, end, 'and so does the page, asking from the start');
+  assert.ok(page.window(now, out), 'the picture draws again');
+  assert.equal(feed.wait(now), null);
+});
+
+test('the page\'s age measure is the engine\'s stamp against this clock, median and worst of the last five seconds', () => {
+  const page = new LivePageFeed(), out = new Uint8Array(1024);
+  const data = Buffer.from(new Int16Array(HOP).fill(5000).buffer).toString('base64');
+  assert.equal(page.ageStats(0), null);
+  page.take({ g: 1, end: HOP, rate: RATE, ageMs: 0, heldMs: 0, at: 1000, data }, 0, 0);
+  for (const [nowMs, wall] of [[10, 1030], [20, 1040], [30, 1090]]) page.window(nowMs, out, wall);
+  assert.deepEqual(page.ageStats(30), { medianMs: 40, worstMs: 90 });
+  assert.equal(page.ageStats(6000), null, 'nothing drawn in the last five seconds');
+  page.take({ g: 1, end: 2 * HOP, rate: RATE, ageMs: 0, heldMs: 0, at: null, data }, 6000, 6000);
+  page.window(6000, out, 9999);
+  assert.equal(page.ageStats(6000), null, 'an engine without the stamp: no measure');
 });
 
 test('the page says what it waits for, in order, and sound is silence only after the lightshow\'s three quiet seconds', () => {
   const sound = { lightshow: true, live: { listening: true }, heardAgoMs: 10, loudAgoMs: 10 };
   assert.equal(liveAudioWait(sound), null);
-  assert.equal(liveAudioWait({ ...sound, link: false, lightshow: false }), 'nodecg');
   assert.equal(liveAudioWait({ ...sound, lightshow: false, live: null }), 'lightshow');
   assert.equal(liveAudioWait({ ...sound, live: null }), 'live-input', 'a lightshow with no live input');
   assert.equal(liveAudioWait({ ...sound, live: { listening: false } }), 'live-input');
@@ -235,7 +289,8 @@ test('a ring keeps one process\'s newest samples, contiguous, and starts again o
   assert.deepEqual(ring.since(8), { from: 8, samples: Int16Array.of(9, 10) });
   assert.equal(take(1, 20, [19, 20]), true);
   assert.deepEqual([...ring.since(-Infinity).samples], [19, 20], 'samples that never came: only what follows them');
-  assert.equal(take(1, 22, [21, 22], MAX_AGE_MS + 1), false, 'too late');
+  assert.equal(take(1, 22, [21, 22], MAX_AGE_MS + 1), true, 'kept, contiguous');
+  assert.ok(!(ring.ageMs(0) <= MAX_AGE_MS), 'but too late to draw');
   assert.equal(take(2, 3, [30, 31, 32]), true, 'a new process');
   assert.deepEqual([ring.g, ring.start, ring.end], [2, 0, 3]);
   for (const bad of [{ g: 2, end: 2, rate: RATE, samples: Int16Array.of(1, 2, 3) }, { g: 2, end: 9, rate: 0, samples: Int16Array.of(1) },

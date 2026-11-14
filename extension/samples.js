@@ -28,7 +28,8 @@ function base64(samples) {
 }
 
 class SampleFeed {
-  constructor({ client, now = Date.now }) {
+  /** `now` is monotonic: a step of the wall clock must not make every packet look late. */
+  constructor({ client, now = () => performance.now() }) {
     this.client = client;
     this.now = now;
     this.clock = new ArrivalClock();
@@ -38,15 +39,15 @@ class SampleFeed {
     this.wanted = false;
   }
 
-  /** A `samples` packet from the lightshow: kept unless it lands too late. */
+  /** A `samples` packet from the lightshow, kept with how far behind its quickest delivery it landed. */
   receive(packet) {
     const samples = packet && int16(packet.data);
     if (!samples || !Number.isSafeInteger(packet.g) || !Number.isSafeInteger(packet.end) || !Number.isInteger(packet.rate) || packet.rate <= 0) return;
-    const now = this.now();
-    // A new live input process counts its stream from zero: its arrivals say nothing of the last one's.
-    if (packet.g !== this.ring.g) this.clock.reset();
+    const now = this.now(), block = { g: packet.g, end: packet.end, rate: packet.rate, samples, at: packet.at };
+    // A new stream counts from zero: its arrivals say nothing of the last one's.
+    if (this.ring.startsAnew(block)) this.clock.reset();
     const behind = this.clock.lateness((packet.end / packet.rate) * 1000, now);
-    if (this.ring.take({ g: packet.g, end: packet.end, rate: packet.rate, samples }, now, behind)) this.answer(now);
+    if (this.ring.take(block, now, behind)) this.answer(now);
   }
 
   /** A page wants the samples after stream position `after` of process `g`; `respond(body)` is called once, with null when too many pages wait. */
@@ -55,8 +56,9 @@ class SampleFeed {
     if (this.waiting.length >= MAX_WAITING) return respond(null);
     this.pulledAt = now;
     this.want(true);
-    const position = g === this.ring.g && Number.isSafeInteger(after) ? after : -Infinity;
-    if (this.ring.end > Math.max(position, this.ring.start)) respond(this.body(position, now));
+    // A position this stream has not reached is from another one that used the name: from the start.
+    const position = g === this.ring.g && Number.isSafeInteger(after) && after <= this.ring.end ? after : -Infinity;
+    if (this.ring.end > Math.max(position, this.ring.start)) respond(this.body(position, now, now));
     else this.waiting.push({ position, respond, at: now });
   }
 
@@ -69,7 +71,7 @@ class SampleFeed {
   tick() {
     const now = this.now(), due = this.waiting.filter((pull) => now - pull.at >= HOLD_MS);
     if (due.length) this.waiting = this.waiting.filter((pull) => now - pull.at < HOLD_MS);
-    for (const pull of due) pull.respond(this.body(pull.position, now));
+    for (const pull of due) pull.respond(this.body(pull.position, now, pull.at));
     if (now - this.pulledAt >= KEEP_MS) this.want(false);
   }
 
@@ -87,7 +89,7 @@ class SampleFeed {
   answer(now) {
     const waiting = this.waiting;
     this.waiting = [];
-    for (const pull of waiting) pull.respond(this.body(pull.position, now));
+    for (const pull of waiting) pull.respond(this.body(pull.position, now, pull.at));
   }
 
   wait(now) {
@@ -96,10 +98,13 @@ class SampleFeed {
       heardAgoMs: now - this.ring.heardAt, loudAgoMs: now - this.ring.loudAt });
   }
 
-  body(position, now) {
-    const { from, samples } = this.ring.since(position);
+  /** `heldMs`: how long the pull waited here, which the page takes off its own measure of the trip. */
+  body(position, now, pulledAt) {
+    // A pull held over a restart asks for a place in the stream before it: from the start of the new one.
+    const { from, samples } = this.ring.since(position > this.ring.end ? -Infinity : position);
     return { wait: this.wait(now), g: this.ring.g, rate: this.ring.rate, from, end: samples.length ? from + samples.length : this.ring.end, data: base64(samples),
-      ageMs: Number.isFinite(this.ring.freshAt) ? Math.max(0, now - this.ring.freshAt) : null, sentAt: now };
+      ageMs: Number.isFinite(this.ring.freshAt) ? Math.max(0, now - this.ring.freshAt) : null, heldMs: now - pulledAt,
+      at: Number.isFinite(this.ring.at) ? this.ring.at : null };
   }
 }
 
