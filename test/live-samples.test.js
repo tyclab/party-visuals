@@ -76,6 +76,7 @@ test('the extension subscribes to the samples while a page pulls and answers eac
 
   const first = pull();
   await until(() => show.sampleSubscribers() === 1, 'the samples subscription');
+  const started = Date.now();
   show.samples(packet(4, 3000, [1000, -2000, 3000]));
   const answer = await first;
   assert.equal(answer.status, 200);
@@ -87,9 +88,11 @@ test('the extension subscribes to the samples while a page pulls and answers eac
 
   const second = pull(`?g=4&after=${body.end}`);
   await new Promise((resolve) => setTimeout(resolve, 50));
-  show.samples(packet(4, 3002, [7, 8]));
+  // On time: as far on in the stream as on the clock.
+  const end = 3000 + Math.round(((Date.now() - started) / 1000) * 22050);
+  show.samples(packet(4, end, [7, 8]));
   const next = JSON.parse((await second).text);
-  assert.deepEqual([next.from, next.end, decode(next)], [3000, 3002, [7, 8]], 'only what the page did not have');
+  assert.deepEqual([next.from, next.end, decode(next)], [end - 2, end, [7, 8]], 'only what the page did not have');
 
   const refused = await pull('', { 'sec-fetch-site': 'cross-site' });
   assert.equal(refused.status, 403, 'another site\'s page may not start the samples');
@@ -128,6 +131,11 @@ test('a pull waits for samples at most half a second, a page that left is forgot
   assert.deepEqual(h.asked, [true, false], 'five seconds without a page: the lightshow stops sending');
   h.pull();
   assert.deepEqual(h.asked, [true, false, true]);
+  h.advance(HOLD_MS);
+  for (let i = 0; i < 8; i++) h.pull({ g: 1, after: 300 });
+  const before = h.answers.length;
+  h.pull({ g: 1, after: 300 });
+  assert.deepEqual(h.answers.slice(before), [null], 'a ninth page waiting is refused, not answered empty at once');
 });
 
 test('the page waits for the lightshow, its live input, its audio, and sound', () => {

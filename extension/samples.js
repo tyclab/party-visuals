@@ -49,13 +49,14 @@ class SampleFeed {
     if (this.ring.take({ g: packet.g, end: packet.end, rate: packet.rate, samples }, now, behind)) this.answer(now);
   }
 
-  /** A page wants the samples after stream position `after` of process `g`; `respond(body)` is called once. */
+  /** A page wants the samples after stream position `after` of process `g`; `respond(body)` is called once, with null when too many pages wait. */
   pull({ g = null, after = null } = {}, respond) {
     const now = this.now();
+    if (this.waiting.length >= MAX_WAITING) return respond(null);
     this.pulledAt = now;
     this.want(true);
     const position = g === this.ring.g && Number.isSafeInteger(after) ? after : -Infinity;
-    if (this.ring.end > Math.max(position, this.ring.start) || this.waiting.length >= MAX_WAITING) respond(this.body(position, now));
+    if (this.ring.end > Math.max(position, this.ring.start)) respond(this.body(position, now));
     else this.waiting.push({ position, respond, at: now });
   }
 

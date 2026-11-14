@@ -90,7 +90,7 @@ function createHttpHandler({ run, state, samples = null, allowHosts = [] }) {
       if (why) return send(res, 403, { ok: false, error: why });
       const number = (name) => (url.searchParams.has(name) && Number.isSafeInteger(Number(url.searchParams.get(name))) ? Number(url.searchParams.get(name)) : null);
       let answered = false;
-      const respond = (body) => { if (!answered) { answered = true; send(res, 200, body); } };
+      const respond = (body) => { if (!answered) { answered = true; send(res, body ? 200 : 503, body ?? { ok: false, error: 'too many pages are waiting for samples' }); } };
       res.on('close', () => { if (!answered) { answered = true; samples.cancel(respond); } });
       samples.pull({ g: number('g'), after: number('after') }, respond);
       return undefined;
