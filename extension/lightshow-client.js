@@ -18,6 +18,7 @@
  *   status  { status, via, since, lastUpdate, error, retryInMs, target }
  *           status: connecting | connected | reconnecting | error | stopped
  *   look    readLook()'s fields and `changed`, the keys that arrived
+ *   samples the live input as heard, while wantSamples(true): each packet acknowledged on arrival
  */
 const { EventEmitter } = require('node:events');
 const { StateMirror, readLook } = require('./protocol.js');
@@ -68,6 +69,7 @@ class LightshowClient extends EventEmitter {
     this.pollAbort = null;
     this.resyncing = false;
     this.stopped = true;
+    this.samplesWanted = false;
 
     // What the status is computed from.
     this.socketUp = false;
@@ -105,6 +107,17 @@ class LightshowClient extends EventEmitter {
     this._update();
   }
 
+  /** Subscribe to the live input's samples, or stop: only while a live-audio page draws. */
+  wantSamples(on) {
+    this.samplesWanted = !!on;
+    if (this.socket && this.socketUp) this.socket.emit(on ? 'subscribe' : 'unsubscribe', ['samples']);
+  }
+
+  /** The lightshow's live input status (`state.live`): null when it has none, undefined when not known. */
+  live() {
+    return this.socketUp ? this.mirror.state.live : undefined;
+  }
+
   // ── Socket.IO ────────────────────────────────────────────────────────────
 
   _openSocket() {
@@ -132,9 +145,15 @@ class LightshowClient extends EventEmitter {
       clearTimeout(this.pollTimer);
       this.pollTimer = null;
       socket.emit('subscribe', ['audio']);
+      if (this.samplesWanted) socket.emit('subscribe', ['samples']);
       this._update();
     });
     socket.on('audio', (feed) => this.emit('audio', audioFrame(feed)));
+    // The lightshow sends the next packet once this one is acknowledged: acknowledge on arrival.
+    socket.on('samples', (packet, ack) => {
+      if (typeof ack === 'function') ack();
+      this.emit('samples', packet);
+    });
     socket.on('snapshot', (snapshot) => {
       if (this.mirror.applySnapshot(snapshot)) this._received();
     });

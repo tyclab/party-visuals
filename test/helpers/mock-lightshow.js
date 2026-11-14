@@ -63,7 +63,7 @@ function listen(server, port) {
 async function startMockLightshow({ token = 'mock-token', port = 0, socket = true, state = {}, refuseHost = false } = {}) {
   const live = { ...baseState(), ...state };
   const versions = { look: 0, rig: 0, show: 0, sources: 0, catalogs: 0, library: 0, system: 0 };
-  const seen = { stateRequests: 0, stateTokens: [], handshakes: [], syncs: 0, subscriptions: [] };
+  const seen = { stateRequests: 0, stateTokens: [], handshakes: [], syncs: 0, subscriptions: [], unsubscriptions: [], acks: 0 };
 
   const server = http.createServer((req, res) => {
     if (req.url.split('?')[0] === '/api/state') {
@@ -104,6 +104,11 @@ async function startMockLightshow({ token = 'mock-token', port = 0, socket = tru
       s.on('subscribe', (feeds) => {
         seen.subscriptions.push(feeds);
         if (Array.isArray(feeds) && feeds.includes('audio')) s.join('audio');
+        if (Array.isArray(feeds) && feeds.includes('samples')) s.join('samples');
+      });
+      s.on('unsubscribe', (feeds) => {
+        seen.unsubscriptions.push(feeds);
+        if (Array.isArray(feeds) && feeds.includes('samples')) s.leave('samples');
       });
       const snapshot = () => ({ protocol: 2, versions: { ...versions }, state: { ...live } });
       if (s.handshake.auth && s.handshake.auth.protocol === 2) {
@@ -131,6 +136,15 @@ async function startMockLightshow({ token = 'mock-token', port = 0, socket = tru
     versions,
     seen,
     audio(feed) { io?.to('audio').emit('audio', feed); },
+    /** A packet of the live input to each samples subscriber, acknowledged as the lightshow asks. */
+    samples(packet) {
+      for (const socket of io ? io.of('/').sockets.values() : []) {
+        if (socket.rooms.has('samples')) socket.timeout(2000).emit('samples', packet, (err) => { if (!err) seen.acks++; });
+      }
+    },
+    sampleSubscribers() {
+      return io ? [...io.of('/').sockets.values()].filter((socket) => socket.rooms.has('samples')).length : 0;
+    },
 
     /** Change keys and send the patches; `drop` loses them on the way, as a missed message would be. */
     publish(changes, { drop = false } = {}) {
