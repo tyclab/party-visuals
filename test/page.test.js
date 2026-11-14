@@ -145,12 +145,18 @@ test('the live-audio page draws from the live input, goes calm on silence and on
   const live = await until(async () => { const now = await look(); return now.wait === null && now.opacity === 1 && now; }, 'the picture showing');
   assert.equal(live.status, '');
   await loudAfter(0);
-  const canvas = page.locator('[data-party-visualizer-canvas]');
-  // A preset may open dark and build up, slowly under software WebGL: the picture has to change within ten seconds.
-  const first = await canvas.screenshot();
-  await until(async () => !(await canvas.screenshot()).equals(first), 'the picture moving', 10_000);
+  // Read while fresh samples are being drawn: only those frames feed the measure.
   const age = (await until(async () => (await look()).age, 'the age measure')).split(',').map(Number);
   assert.ok(age.every((ms) => ms >= 0 && ms < 2000), `newest drawn sample ${age} ms old against the stamp`);
+  // A preset may open dark and build up, slowly under software WebGL: the picture has to change within ten
+  // seconds. Screenshots of a software-rendered canvas are costly, so one each half second.
+  const canvas = page.locator('[data-party-visualizer-canvas]'), first = await canvas.screenshot();
+  let moved = false;
+  for (const end = Date.now() + 10_000; !moved && Date.now() < end;) {
+    await page.waitForTimeout(500);
+    moved = !(await canvas.screenshot()).equals(first);
+  }
+  assert.ok(moved, 'the picture moves');
 
   // Calm on silence, and back with the sound.
   sound.tone(false);
