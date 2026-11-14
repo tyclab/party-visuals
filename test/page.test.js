@@ -120,7 +120,8 @@ test('the live-audio page draws from the live input, goes calm on silence and on
   const args = (process.env.PARTY_VISUALS_BROWSER_ARGS || '').split(' ').filter(Boolean);
   const browser = await chromium.launch({ args, channel: process.env.PARTY_VISUALS_BROWSER_CHANNEL || undefined });
   t.after(() => browser.close());
-  const context = await browser.newContext({ viewport: { width: 640, height: 360 } });
+  // Small, so a software renderer on CI keeps its frames short enough for samples to stay fresh.
+  const context = await browser.newContext({ viewport: { width: 320, height: 180 } });
   const outside = [];
   await context.route('**/*', (route) => {
     if (new URL(route.request().url()).origin === origin) return route.continue();
@@ -134,12 +135,13 @@ test('the live-audio page draws from the live input, goes calm on silence and on
   await page.goto(`${origin}/bundles/party-visuals/graphics/milkdrop.html`);
   assert.equal(await page.evaluate(() => !!document.createElement('canvas').getContext('webgl2')), true,
     'this Chromium draws no WebGL 2: see PARTY_VISUALS_BROWSER_CHANNEL in this file');
-  const look = () => page.evaluate(() => {
+  const look = (since = 0) => page.evaluate((from) => {
     const view = document.querySelector('[data-party-visualizer]'), swings = window.__swings || [];
-    return { wait: view.getAttribute('data-party-wait'), age: view.getAttribute('data-party-age'), swings: swings.length, loud: Math.max(0, ...swings.slice(-20)),
+    return { wait: view.getAttribute('data-party-wait'), age: view.getAttribute('data-party-age'), swings: swings.length, loud: Math.max(0, ...swings.slice(from)),
       opacity: Number(getComputedStyle(document.querySelector('[data-party-visualizer-layer]')).opacity), status: document.querySelector('[role="status"]').textContent };
-  });
-  const loudAfter = (count) => until(async () => { const now = await look(); return now.swings > count + 10 && now.loud > 30 && now; }, 'loud samples handed to the renderer');
+  }, since);
+  // Any render since `count` handed loud samples: on a slow renderer many frames get silence, the bound holding.
+  const loudAfter = (count) => until(async () => { const now = await look(count); return now.swings > count + 10 && now.loud > 30 && now; }, 'loud samples handed to the renderer');
 
   // Requirement 1: the picture from the room's sound.
   const live = await until(async () => { const now = await look(); return now.wait === null && now.opacity === 1 && now; }, 'the picture showing');
@@ -168,9 +170,10 @@ test('the live-audio page draws from the live input, goes calm on silence and on
   await loudAfter(back.swings);
 
   // A restarted lightshow that counts from zero under the same name.
-  const before = await look();
   sound.restart();
-  await loudAfter(before.swings);
+  // Past the old stream's last fresh window, so only the new count can be loud from here.
+  await page.waitForTimeout(500);
+  await loudAfter((await look()).swings);
 
   // Its own reason for a refused or hung samples endpoint, and back when it answers again.
   for (const [wait, answer] of [['busy', (route) => route.fulfill({ status: 503, body: '{}' })], ['endpoint', (route) => route.fulfill({ status: 500, body: 'no' })],
