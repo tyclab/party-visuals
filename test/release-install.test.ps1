@@ -58,6 +58,16 @@ try {
     }
     try { New-ControllerConfig 'http://music.example:8095' ' ' 'C:\chrome.exe' 'C:\node.exe' 'C:\cfg.json' | Out-Null } catch { $refused++ }
     Check 'credentials, queries, other schemes and an empty player are refused' ($refused -eq 5)
+    $live = New-ControllerConfig '' '' 'C:\chrome.exe' 'C:\node.exe' 'C:\cfg.json' -LiveAudio
+    Check '-LiveAudio shows the live-audio page on the NodeCG origin, with every output off' ($live.visualizerUrl -eq 'http://127.0.0.1:9090/bundles/party-visuals/graphics/milkdrop.html' -and $live.controlsUrl -eq 'http://127.0.0.1:9090/bundles/party-visuals/api/state' -and -not $live.curtain -and -not $live.room)
+    $message = ''
+    try { Assert-Prerequisites $live } catch { $message = $_.Exception.Message }
+    Check 'a bundle without the live-audio page is named before staging' ($message -like '*live-audio page*')
+    $LiveAudio = [switch]$true; $Player = 'player'
+    $message = ''
+    try { Invoke-ReleaseInstall } catch { $message = $_.Exception.Message }
+    Check '-LiveAudio with a Music Assistant player is refused' ($message -like 'Use -LiveAudio without*')
+    $LiveAudio = [switch]$false; $Player = $null
     $message = ''
     try { Assert-Prerequisites $config } catch { $message = $_.Exception.Message }
     Check 'missing prerequisites are all named before staging' ($message -like '*Node.js*' -and $message -like '*Chrome*' -and $message -like '*NodeCG*' -and $message -like '*Capture helper*')
