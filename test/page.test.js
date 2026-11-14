@@ -146,8 +146,9 @@ test('the live-audio page draws from the live input, goes calm on silence and on
   assert.equal(live.status, '');
   await loudAfter(0);
   const canvas = page.locator('[data-party-visualizer-canvas]');
-  const first = await canvas.screenshot(), second = await (async () => { await page.waitForTimeout(400); return canvas.screenshot(); })();
-  assert.notDeepEqual(first, second, 'the picture moves');
+  // A preset may open dark and build up, slowly under software WebGL: the picture has to change within ten seconds.
+  const first = await canvas.screenshot();
+  await until(async () => !(await canvas.screenshot()).equals(first), 'the picture moving', 10_000);
   const age = (await until(async () => (await look()).age, 'the age measure')).split(',').map(Number);
   assert.ok(age.every((ms) => ms >= 0 && ms < 2000), `newest drawn sample ${age} ms old against the stamp`);
 
