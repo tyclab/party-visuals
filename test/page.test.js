@@ -111,7 +111,7 @@ function recordRenders() {
   } });
 }
 
-test('the live-audio page draws from the live input, goes calm on silence, survives a lost context and a restart, and asks nothing beyond its origin', { timeout: 120_000 }, async (t) => {
+test('the live-audio page draws from the live input, goes calm on silence and on a refused or hung endpoint, survives a lost context and a restart, and asks nothing beyond its origin', { timeout: 120_000 }, async (t) => {
   const show = await startMockLightshow({ token: TOKEN, state: { live: { running: true, listening: true, quiet: false } } });
   t.after(() => show.close());
   const sound = source(show);
@@ -164,6 +164,17 @@ test('the live-audio page draws from the live input, goes calm on silence, survi
   const before = await look();
   sound.restart();
   await loudAfter(before.swings);
+
+  // Its own reason for a refused or hung samples endpoint, and back when it answers again.
+  for (const [wait, answer] of [['busy', (route) => route.fulfill({ status: 503, body: '{}' })], ['endpoint', (route) => route.fulfill({ status: 500, body: 'no' })],
+    ['nodecg', () => {}]]) {
+    await page.route('**/api/samples*', answer);
+    const calm = await until(async () => { const now = await look(); return now.wait === wait && now; }, `${wait} said`, 5000);
+    assert.notEqual(calm.status, '');
+    await until(async () => (await look()).opacity === 0, `the picture faded out for ${wait}`, 3000);
+    await page.unrouteAll({ behavior: 'ignoreErrors' });
+    await until(async () => { const now = await look(); return now.wait === null && now.opacity === 1 && now; }, `back after ${wait}`, 6000);
+  }
 
   // A lost graphics context: hidden at once with its reason, then the page loads again by itself.
   const reloaded = page.waitForEvent('load', { timeout: 10_000 });
