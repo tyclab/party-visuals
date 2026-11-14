@@ -276,8 +276,11 @@ topic. The live-audio page needs NodeCG's login off, as the installer leaves it.
 The page renders with [Butterchurn](https://github.com/jberg/butterchurn) 2.6.7, the WebGL
 implementation of MilkDrop, and its base preset pack, `butterchurn-presets` 2.4.7. Both are
 this bundle's npm dependencies: the installer's `npm ci` puts them in
-`bundles\party-visuals\node_modules`, and NodeCG serves them to the page from there, so
-nothing is fetched from the internet when the page loads. It needs WebGL 2; without
+`bundles\party-visuals\node_modules`, and NodeCG serves them to the page from there
+(its `/bundles/<bundle>/node_modules/` route, checked in NodeCG 2.8.0's source; the
+browser test serves the same paths itself, not through NodeCG). Nothing is fetched from
+the internet when the page loads: the browser test blocks every request outside the
+page's own origin and the page works without one. It needs WebGL 2; without
 it the page says so and the helper reports the visualizer unavailable.
 
 **Its sound.** The extension subscribes to the engine's read-only `samples` topic, with
@@ -285,30 +288,46 @@ the token it already holds, only while a live-audio page asks for samples (the
 subscription ends five seconds after the last page stops asking), and acknowledges each
 packet as it arrives. The page asks `GET api/samples` on its own origin, one request at
 a time; the extension answers as soon as it has samples the page lacks, at most the
-newest 1024, or after half a second with none. The token never reaches the page. Each
+newest 1024, or after half a second with none. A request without an answer after two
+seconds counts as no connection to NodeCG. The token never reaches the page. Each
 frame the page hands the renderer the newest 512 samples, doubled to the 44.1 kHz its
 band levels assume, as 1024 time-domain bytes, mono to both channels. The page has no
 audio output and no audio context: nothing can reach the speakers from it.
 
-**Timing.** No sample is drawn more than 100 ms after the quickest delivery of the last
-five seconds. A packet that lands later than that, in the extension or in the page, is
-dropped there; the renderer draws silence rather than a window whose newest sample is
-older than that. No link holds more than one packet: the engine sends the next packet
-only after the extension's acknowledgement, with the samples that came meanwhile (the
-newest 1024 at most), and the page has one request out. A slow page, a hiccup or a
-clock difference between the engine and the show PC therefore drops samples and never
-queues them. Normally the path adds one capture block (11.6 ms) and a few milliseconds
-of network, and the next frame. The 100 ms leaves room for the jitter of the audio
-driver and the event loops (tens of milliseconds) while keeping the picture inside a
-sixteenth note at 128 bpm (117 ms). A lasting change of the path, such as samples the
-sound card lost, becomes the new quickest path within five seconds.
+**Timing.** The renderer draws silence rather than a window whose newest sample is more
+than 100 ms past the quickest delivery of the last five seconds; `test/samples.test.js`
+holds that to 105 ms, the extra 5 ms for a sound card 0.1 % off over those five
+seconds. That is a bound on top of the quickest path, the baseline, which is not
+measured here: the capture block, the network and the next frame are in it. Each part
+of the path holds little: the engine's live input sends sample lines only while the
+engine has read to within 1024 samples (46 ms) of them; the engine sends the extension
+its next packet when the last is acknowledged, or after a second without that, so a
+stalled link can hold one packet a second; the extension answers each pull with at most
+the newest 1024 samples; and the page has one request out. A slow page or a hiccup
+drops samples and never queues them. Lateness is measured on monotonic clocks against
+the stream's own sample count, so neither machine's wall clock enters it. A lasting
+change of the path, such as samples the sound card lost, becomes the new quickest path
+within five seconds. Why 100 ms: room for jitter of the path while the picture stays
+inside a sixteenth note at 128 bpm (117 ms); how much jitter the real path has is not
+measured here.
+
+**Measuring the baseline.** The engine stamps each block with its wall clock when it
+was read from the device, and the page compares the stamp of the newest sample it draws
+with the show PC's clock: the median and worst of the last five seconds are its
+`data-party-age` attribute (`median,worst` in ms), which the capture helper writes to
+its status file as `display.ageMs` beside `display.wait`. It is a diagnostic only, as
+good as the two machines' clock sync, and decides nothing about what is drawn.
 
 **When it is calm.** The page fades its picture out over a second and says at its lower
 left what it waits for, also as its `data-party-wait` attribute:
 
 | Status | `data-party-wait` | When |
 |---|---|---|
-| No connection to NodeCG | `nodecg` | The page's own requests fail |
+| This browser cannot draw the visualizer (no WebGL 2) | `webgl` | No WebGL 2; the page loads again every 30 s |
+| The graphics context was lost; reloading | `context` | The browser took the page's WebGL context away: the picture is hidden at once, not faded, and the page loads again within 3 s |
+| No connection to NodeCG | `nodecg` | The page's requests fail or have no answer within two seconds |
+| Too many live-audio pages are open | `busy` | The extension refuses a ninth waiting page (HTTP 503) |
+| The samples endpoint refused this page | `endpoint` | Any other error answer from `api/samples` |
 | No connection to the lightshow | `lightshow` | The extension has no socket to the engine (polling carries no samples) |
 | The lightshow has no live input | `live-input` | The engine has no live input, or it is not listening |
 | No audio from the lightshow | `audio` | No sample for a second |
@@ -506,7 +525,7 @@ flowchart LR
   Session[Console / Remote Desktop connect, unlock] --> BrowserTask
   BrowserTask -->|Reopen after exit or session move, until -Stop| Browser[Fullscreen visualizer page / continuous background capture]
   Music[Music Assistant PCM, Music Assistant page] --> Browser
-  Lightshow -->|Read-only samples while a page asks, one acknowledged packet at a time| Samples[Extension sample feed]
+  Lightshow -->|Read-only samples while a page asks, the next packet on acknowledgement or after 1 s| Samples[Extension sample feed]
   Samples -->|api/samples, one request out, newest only| LivePage[Live-audio page, Butterchurn]
   LivePage --> Browser
   BrowserTask --> Helper[Local browser helper]
@@ -584,11 +603,17 @@ Repository contribution rules and comment-limit approvals live in [AGENTS.md](AG
 
 ```
 npm install
+npx playwright-core install chromium
 npm test
 ```
 
-The tests run against a local mock of the engine's Socket.IO server; nothing leaves the
-machine. `shared/` is loaded both by the extension and, as plain scripts, by the graphics.
+The tests run against a local mock of the engine's Socket.IO server and its samples relay
+(`test/helpers/mock-relay.js`, which names the engine commit it follows); nothing leaves
+the machine. `test/page.test.js` drives the live-audio page in headless Chromium. Where
+the headless shell has no WebGL 2 (some Nix builds), run it with
+`PARTY_VISUALS_BROWSER_CHANNEL=chromium` and `PARTY_VISUALS_BROWSER_ARGS` holding the
+flags that give that Chromium WebGL, such as
+`--use-gl=angle --use-angle=vulkan --enable-features=Vulkan --ignore-gpu-blocklist`. `shared/` is loaded both by the extension and, as plain scripts, by the graphics.
 
 On Windows, `powershell -NoProfile -ExecutionPolicy Bypass -File test\install.test.ps1`
 checks the install script in a folder under `%TEMP%`: the token file, the configuration
