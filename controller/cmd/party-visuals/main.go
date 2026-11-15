@@ -152,7 +152,15 @@ func menu(root string) error {
 		}
 	}
 }
-func app(root string) error {
+func app(root string) error { return owned(root, serve) }
+
+// detach is releaseAppConsole; a test keeps its console and its output.
+var detach = releaseAppConsole
+
+// owned takes the controller folder and runs the controller in it with
+// controller.log open. A controller that ends on an error says why there,
+// since nothing reads its console.
+func owned(root string, run func(string, worker.Config, *controllerLog) error) error {
 	c, e := worker.Load(filepath.Join(root, "config.json"))
 	if e != nil {
 		return e
@@ -167,11 +175,18 @@ func app(root string) error {
 		return e
 	}
 	defer logFile.Close()
-	if e = releaseAppConsole(logFile); e != nil {
+	if e = detach(logFile); e != nil {
 		return e
 	}
 	logger := &controllerLog{Logger: log.New(logFile, "", log.LstdFlags)}
 	logger.Printf("controller %s started", version)
+	if e = run(root, c, logger); e != nil {
+		logger.Printf("controller stopped: %v", e)
+	}
+	return e
+}
+func serve(root string, c worker.Config, logger *controllerLog) error {
+	var e error
 	var m *lifecycle.Manager
 	var source *partysource.Source
 	if c.HomeAssistantURL != "" {
@@ -309,6 +324,7 @@ func app(root string) error {
 	go func() {
 		select {
 		case <-signals:
+			m.Apply("stop")
 			cancel()
 			t.Quit()
 		case <-ctx.Done():

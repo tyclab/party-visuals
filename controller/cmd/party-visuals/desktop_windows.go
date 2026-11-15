@@ -11,6 +11,9 @@ import (
 	"unsafe"
 )
 
+// releaseAppConsole sends the controller's output to log and frees a console
+// only it is on. The Go runtime prints a crash to the standard error handle,
+// not to os.Stderr, so that handle becomes log as well.
 func releaseAppConsole(log *os.File) error {
 	os.Stdout, os.Stderr = log, log
 	dll := windows.NewLazySystemDLL("kernel32.dll")
@@ -19,7 +22,7 @@ func releaseAppConsole(log *os.File) error {
 	if count == 1 {
 		dll.NewProc("FreeConsole").Call()
 	}
-	return nil
+	return windows.SetStdHandle(windows.STD_ERROR_HANDLE, windows.Handle(log.Fd()))
 }
 
 func newConsole(c *exec.Cmd) {
