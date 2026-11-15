@@ -18,6 +18,11 @@ Read for this topic; paths below are relative to the repository root unless stat
   dependency pins are in the README; keep `shared/samples.js`, `test/helpers/mock-relay.js`
   and the engine's `samples` topic (lightshow `src/server/sample-relay.ts`, the commit the
   mock names) in step.
+- Visuals on an unexpected screen: read the newest `visuals open on` line in
+  `controller.log` (or `Display:` in diagnostics) before anything else; it names the
+  screen and the rule's reason ([Choosing the screen](../../controller/README.md#choosing-the-screen)).
+  `test\display-target.acceptance.ps1` proves Chrome's placement but opens visible
+  windows: run it only with the operator's go.
 - A covered Chrome window can stop painting; bring the capture window to the
   foreground. The helper intentionally covers the visualizer while NodeCG is
   unreachable, so check NodeCG first when music plays behind a black screen.
