@@ -26,7 +26,7 @@ Read for this topic; paths below are relative to the repository root unless stat
 - Installer changes must pass the Windows PowerShell 5.1 path:
   `powershell -NoProfile -ExecutionPolicy Bypass -File test\install.test.ps1`.
 - A controller that is not running: read the end of `controller.log` first. It
-  holds `controller stopped: <error>` or the Go runtime's crash report
+  holds `controller did not start: <error>`, `controller stopped: <error>` or the Go runtime's crash report
   ([Keeping the controller running](../../controller/README.md#keeping-the-controller-running)).
 - `test/controller-install.test.ps1` loads the ScheduledTasks module first and
   replaces each of its commands that changes a task with one that throws, so a
