@@ -20,3 +20,16 @@ test('presets change after their time with the picture showing, each once a roun
   assert.equal(cycle.advance(PRESET_SECONDS * 1000 - 1000), false, 'a stall of the page counts at most a second');
   assert.equal(new PresetCycle([]).next(), null);
 });
+
+test('a preset that does not compile is counted, left out from then on, and with none left there is no preset', () => {
+  const cycle = new PresetCycle(['a', 'b', 'c', 'd'], { random: () => 0.5 });
+  const tried = [], load = (name) => { tried.push(name); if (name === 'b' || name === 'd') throw new SyntaxError(name); };
+  const shown = Array.from({ length: 8 }, () => cycle.load(load));
+  assert.deepEqual([...cycle.failed].sort(), ['b', 'd']);
+  assert.ok(shown.every((name) => name === 'a' || name === 'c'), shown.join());
+  assert.equal(tried.filter((name) => name === 'b').length, 1, 'tried once, then left out');
+  assert.deepEqual([...cycle.names].sort(), ['a', 'c']);
+  const none = new PresetCycle(['x', 'y']);
+  assert.equal(none.load(() => { throw new Error('no'); }), null);
+  assert.equal(none.failed.length, 2);
+});
