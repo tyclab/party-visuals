@@ -40,8 +40,10 @@
         const response = await fetch(`../api/samples${feed.query()}`, { cache: 'no-store', signal: abort.signal });
         if (!response.ok) link = response.status === 503 ? 'busy' : 'endpoint';
         else {
-          const body = await response.json().catch(() => null);
+          // A body cut short (a reset, or the abort after the headers) is the connection's; only a whole one is data.
+          const text = await response.text();
           try {
+            const body = JSON.parse(text);
             feed.take(body, performance.now(), asked);
             link = null;
             wait = PV.WAITS.includes(body.wait) ? body.wait : null;
