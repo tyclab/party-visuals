@@ -56,6 +56,7 @@ type Manager struct {
 	backend Backend
 	store   Store
 	state   Status
+	saved   Intent // what the store holds; differs after a Stop whose Off could not be saved
 	cancel  context.CancelFunc
 	session Session
 	changed func(Status)
@@ -81,7 +82,7 @@ func New(store Store, backend Backend, changed func(Status)) (*Manager, error) {
 		}
 	}
 	life, end := context.WithCancel(context.Background())
-	return &Manager{store: store, backend: backend, state: Status{Intent: intent, Phase: "off"}, changed: changed, life: life, end: end}, nil
+	return &Manager{store: store, backend: backend, state: Status{Intent: intent, Phase: "off"}, saved: intent, changed: changed, life: life, end: end}, nil
 }
 
 func (m *Manager) Snapshot() Status { m.mu.Lock(); defer m.mu.Unlock(); return m.state }
@@ -129,12 +130,17 @@ func (m *Manager) apply(command, reason string, expectedGeneration uint64) error
 		m.mu.Unlock()
 		return errors.New("unknown controller command")
 	}
-	if next.Intent != m.state.Intent {
-		if err := m.store.Save(next.Intent); err != nil {
-			if command != "stop" {
-				m.mu.Unlock()
-				return err
-			}
+	if next.Intent != m.saved {
+		err := m.store.Save(next.Intent)
+		switch {
+		case err == nil:
+			m.saved = next.Intent
+		case next.Intent == m.state.Intent:
+			// An Off that could not be saved stays owed; this command does not fail over it.
+		case command != "stop":
+			m.mu.Unlock()
+			return err
+		default:
 			persistenceError = err
 			reason = "Could not persist Off; visuals stopped: " + err.Error()
 		}
@@ -190,7 +196,13 @@ func (m *Manager) CloseRestored(ctx context.Context) {
 	if err := m.closeRestored(ctx, false); err == nil && m.blocked != 0 {
 		gen := m.blocked
 		m.blocked = 0
-		_ = m.apply("stop", "", gen)
+		// A Start by hand returns to Off. Follow Party asked for its Start
+		// itself, at sign-in when Windows restores windows, and tries it again.
+		command := "stop"
+		if m.Snapshot().Intent.Mode == "follow-party" {
+			command = "restore"
+		}
+		_ = m.apply(command, "", gen)
 	}
 }
 func (m *Manager) closeRestored(ctx context.Context, start bool) error {
@@ -310,9 +322,16 @@ func (m *Manager) reconcile(ctx context.Context, gen uint64, want bool) {
 }
 
 // Close ends the session and leaves the intent as it is: only Stop records
-// Off, so an owner that ends on its own does not turn Follow Party off.
+// Off, so an owner that ends on its own does not turn Follow Party off. An
+// Off that could not be saved before is saved now.
 func (m *Manager) Close() error {
 	m.mu.Lock()
+	var owed error
+	if !m.closed && m.state.Intent != m.saved {
+		if owed = m.store.Save(m.state.Intent); owed == nil {
+			m.saved = m.state.Intent
+		}
+	}
 	m.closed = true
 	if m.cancel != nil {
 		m.cancel()
@@ -324,5 +343,5 @@ func (m *Manager) Close() error {
 	m.session = nil
 	m.run.Unlock()
 	m.wg.Wait()
-	return err
+	return errors.Join(owed, err)
 }
