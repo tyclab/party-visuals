@@ -95,14 +95,15 @@ unreadable or empty token file, a token file other accounts can open and a
 malformed entity id.
 
 Diagnostics separate screen/helper, Lightshow analysis audio, output eligibility
-and OpenRGB SDK. Analysis frames do not prove the page's audio: Music Assistant's
-visualizer needs audio through its player queue, and the live-audio page waits for
-what its status file reports (`display.wait`, `display.ageMs`). Stale helper status
-is unknown, never ready. With Music Assistant's page, enable its player visualizer
-explicitly through its normal UI; the controller never changes that preference, and
-when no usable canvas exists the capture helper preserves normal MA artwork/text.
-The live-audio page goes calm and names what it waits for. The helper's
-`--status-file` support is required before a session can run.
+and OpenRGB SDK. Analysis frames do not prove the page has audio to draw: Music
+Assistant's visualizer needs audio through its player queue, and the live-audio page
+draws only from the engine's live input. Stale helper status is unknown, never ready.
+With Music Assistant's page, enable its player visualizer explicitly through its
+normal UI; the controller never changes that preference, and when no usable canvas
+exists the capture helper preserves normal MA artwork/text. The live-audio page goes
+calm and names what it waits for on screen and in the helper's status file
+(`display.wait`, beside `display.ageMs`). The helper's `--status-file` support is
+required before a session can run.
 
 ## Sign-in restore
 
@@ -184,8 +185,8 @@ value of its now-playing page), names any missing prerequisite and runs Stage
 with the verified hash. Add `-Cutover` to activate the controller in the same
 run; visuals still begin Off and nothing is armed. `-MusicAssistantUrl`,
 `-Player`, `-ChromeExe`, `-NodeExe` and `-NodecgConfig` replace the prompts and
-defaults; `-LiveAudio` (release v0.1.3 or later) shows the bundle's live-audio visualizer instead of a Music
-Assistant player and asks for neither
+defaults; `-LiveAudio` (release v0.1.3 or later) shows the bundle's live-audio
+visualizer instead of a Music Assistant player and asks for neither
 ([Choosing the visualizer](../README.md#choosing-the-visualizer)); `-ConfigPath` or `-ImportLegacy` go to Stage unchanged. Curtain, room
 and panel output need a reviewed `-ConfigPath`. `SHA256SUMS` comes from the same
 release, so, as for tycswap's upgrade, it catches damaged or incomplete

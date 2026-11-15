@@ -151,7 +151,8 @@ from a TycStation Lightshow commit to `%LOCALAPPDATA%\PartyVisuals\browser-visua
 run `npm.cmd ci --omit=dev --ignore-scripts` in that folder. Lightshow has no releases;
 the live-audio page needs the helper from lightshow commit `91d0b405` or later (an older
 helper refuses any page that is not a Music Assistant player). An existing show PC is
-updated in the order in [Updating a show PC](#updating-a-show-pc). Copy `Start-PartyVisualsBrowser.ps1` into the local startup folder.
+updated in the order in [Updating a show PC](#updating-a-show-pc). Copy
+`Start-PartyVisualsBrowser.ps1` into the local startup folder.
 The launcher has no default page: pass one as `-VisualizerUrl`, Music Assistant's
 player page (for example
 `http://<music-assistant-host>:8095/#/now-playing?player=<player-id>&frameless=1`; sign
@@ -284,7 +285,11 @@ To bring the live-audio page to a show PC that runs an older setup, in this orde
 2. **The capture helper**, `tools/browser-visuals` from the same or a later lightshow
    commit, copied to `%LOCALAPPDATA%\PartyVisuals\browser-visuals`, then
    `npm.cmd ci --omit=dev --ignore-scripts` there. An older helper refuses the
-   live-audio page's address and exits.
+   live-audio page's address and exits. The page's `renderer`, `presets` and `data`
+   waits (bundles after `da1c162`) are named in the helper's log and status file from
+   [lightshow #214](https://github.com/tyclab/lightshow/pull/214) on; an older helper
+   still captures the page but logs `presets` and `data` as "waiting for sound",
+   `renderer` as "no WebGL 2?", and leaves them out of its status file.
 3. **The bundle**: `Install-PartyVisuals.ps1` (its default bundle is `da1c162`, the first
    with the page; `-BundleRef` takes a later commit or release tag), then stop and start
    NodeCG.
