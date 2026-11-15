@@ -14,6 +14,8 @@ $ControllerTask = 'PartyVisuals Controller'
 $LegacyTasks = @('PartyVisuals Browser','PartyVisuals NodeCG')
 $StateRoot = Join-Path $Root 'controller'
 $JournalPath = Join-Path $StateRoot 'migration.json'
+# Twice what a controller takes at most to end its session: 45 s for the worker and two waits of 5 s for its exit.
+$ControllerStopSeconds = 110
 
 function Save-ControllerJson([string] $Path, $Value) {
     $temp = $Path + '.new'
@@ -156,14 +158,47 @@ function Stage-Controller {
     Save-ControllerJson $JournalPath $journal
     Write-Host 'Controller staged and checked. Existing tasks and running visuals are unchanged.'
 }
+# New-ControllerTaskDefinition builds the task without registering anything.
+function New-ControllerTaskDefinition([string] $Exe) {
+    $user = [Security.Principal.WindowsIdentity]::GetCurrent().Name
+    $action = New-ScheduledTaskAction -Execute $Exe -Argument ('--root "' + $StateRoot + '" app') -WorkingDirectory (Split-Path -Parent $Exe)
+    # Task Scheduler starts nothing again after an exit, whatever its code. The second
+    # trigger asks every minute; IgnoreNew drops it while the controller runs.
+    $triggers = @((New-ScheduledTaskTrigger -AtLogOn -User $user), (New-ScheduledTaskTrigger -Once -At (Get-Date) -RepetitionInterval ([timespan]::FromMinutes(1))))
+    $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit ([timespan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 999 -RestartInterval ([timespan]::FromMinutes(1))
+    return @{ Action = $action; Triggers = $triggers; Settings = $settings; User = $user }
+}
 function Register-ControllerTask([string] $Exe) {
     $existing = Get-ScheduledTask -TaskName $ControllerTask -ErrorAction SilentlyContinue
     if ($null -ne $existing) { Assert-OwnedTask $existing (Join-Path $StateRoot 'releases\') }
-    $user = [Security.Principal.WindowsIdentity]::GetCurrent().Name
-    $action = New-ScheduledTaskAction -Execute $Exe -Argument ('--root "' + $StateRoot + '" app') -WorkingDirectory (Split-Path -Parent $Exe)
-    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $user
-    $settings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit ([timespan]::Zero) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -RestartCount 999 -RestartInterval ([timespan]::FromMinutes(1))
-    Register-ScheduledTask -TaskName $ControllerTask -Action $action -Trigger $trigger -Settings $settings -User $user -RunLevel Limited -Force | Out-Null
+    $task = New-ControllerTaskDefinition $Exe
+    Register-ScheduledTask -TaskName $ControllerTask -Action $task.Action -Trigger $task.Triggers -Settings $task.Settings -User $task.User -RunLevel Limited -Force | Out-Null
+}
+function Send-ControllerQuit([string] $Exe) {
+    if (-not (Test-Path -LiteralPath $Exe -PathType Leaf)) { return }
+    $priorErrorPreference = $ErrorActionPreference
+    try { $ErrorActionPreference = 'Continue'; & $Exe --root $StateRoot quit 2>$null | Out-Null } finally { $ErrorActionPreference = $priorErrorPreference }
+}
+# Stop-RunningController returns the controller's lock. Where the controller's task
+# exists it disables it first, so its minute check starts nothing meanwhile, asks
+# the controller to quit and waits for the lock. The task stays disabled until
+# Cutover registers it again.
+function Stop-RunningController([string] $StillRunning) {
+    $task = Get-ScheduledTask -TaskName $ControllerTask -ErrorAction SilentlyContinue
+    Assert-OwnedTask $task (Join-Path $StateRoot 'releases\')
+    if ($null -eq $task) { return Enter-ControllerOwnership }
+    Disable-ScheduledTask -TaskName $ControllerTask | Out-Null
+    Send-ControllerQuit $task.Actions[0].Execute
+    $until = [datetime]::UtcNow.AddSeconds($ControllerStopSeconds)
+    do {
+        try { return Enter-ControllerOwnership } catch { Start-Sleep -Milliseconds 200 }
+    } while ([datetime]::UtcNow -lt $until)
+    throw $StillRunning
+}
+function Save-ControllerOff {
+    $intentPath = Join-Path $StateRoot 'intent.json'
+    $intent = Get-Content -LiteralPath $intentPath -Raw | ConvertFrom-Json
+    $intent.manualOff = $true; $intent.requested = $false; Save-ControllerJson $intentPath $intent
 }
 function Wait-ControllerReady([string] $Exe) {
     $until = [datetime]::UtcNow.AddSeconds(30)
@@ -180,9 +215,11 @@ function Wait-ControllerReady([string] $Exe) {
 }
 function Cutover-Controller($Journal) {
     Test-ControllerBinary $Journal.exe (Split-Path -Parent $Journal.config)
-    $guard = Enter-ControllerOwnership
+    $guard = Stop-RunningController 'The running controller has not stopped; its task stays disabled. Stop it, then retry Cutover.'
     try {
     Save-ControllerJson (Join-Path $StateRoot 'config.json') (Get-Content -LiteralPath $Journal.config -Raw | ConvertFrom-Json)
+    # Visuals begin Off: the new controller keeps a Start that Follow Party had.
+    Save-ControllerOff
     foreach ($record in $Journal.tasks) {
         $task = Get-ScheduledTask -TaskName $record.name -ErrorAction SilentlyContinue
         Assert-OwnedTask $task $record.script
@@ -205,20 +242,9 @@ function Cutover-Controller($Journal) {
     Write-Host 'Controller activated. Start visuals explicitly from the tray or CLI; rig controls were not changed.'
 }
 function Rollback-Controller($Journal) {
-    $task = Get-ScheduledTask -TaskName $ControllerTask -ErrorAction SilentlyContinue
-    Assert-OwnedTask $task (Join-Path $StateRoot 'releases\')
-    if ($null -ne $task) {
-        Disable-ScheduledTask -TaskName $ControllerTask | Out-Null
-        & $Journal.exe --root $StateRoot quit 2>$null
-        $until = [datetime]::UtcNow.AddSeconds(60)
-        while ((Get-ScheduledTask -TaskName $ControllerTask).State -eq 'Running' -and [datetime]::UtcNow -lt $until) { Start-Sleep -Milliseconds 200 }
-        if ((Get-ScheduledTask -TaskName $ControllerTask).State -eq 'Running') { throw 'New owner has not stopped; prior supervisors remain disabled.' }
-    }
-    $guard = Enter-ControllerOwnership
+    $guard = Stop-RunningController 'New owner has not stopped; prior supervisors remain disabled.'
     try {
-    $intentPath = Join-Path $StateRoot 'intent.json'
-    $intent = Get-Content -LiteralPath $intentPath -Raw | ConvertFrom-Json
-    $intent.manualOff = $true; $intent.requested = $false; Save-ControllerJson $intentPath $intent
+    Save-ControllerOff
     foreach ($record in $Journal.tasks) {
         Register-ScheduledTask -TaskName $record.name -Xml ([IO.File]::ReadAllText($record.xml)) -Force | Out-Null
         Disable-ScheduledTask -TaskName $record.name | Out-Null

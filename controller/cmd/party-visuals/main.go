@@ -152,26 +152,51 @@ func menu(root string) error {
 		}
 	}
 }
-func app(root string) error {
+func app(root string) error { return owned(root, serve) }
+
+// detach is releaseAppConsole; a test keeps its console and its output.
+var detach = releaseAppConsole
+
+// owned takes the controller folder and runs the controller in it with
+// controller.log open. A controller that cannot start or ends on an error
+// says why there, since nothing reads its console.
+func owned(root string, run func(string, worker.Config, *controllerLog) error) error {
 	c, e := worker.Load(filepath.Join(root, "config.json"))
 	if e != nil {
-		return e
+		return notStarted(root, e)
 	}
 	l, e := owner.Acquire(root)
 	if e != nil {
-		return e
+		return notStarted(root, e)
 	}
 	defer l.Close()
 	logFile, e := openLog(root)
 	if e != nil {
-		return e
+		return notStarted(root, e)
 	}
 	defer logFile.Close()
-	if e = releaseAppConsole(logFile); e != nil {
-		return e
-	}
 	logger := &controllerLog{Logger: log.New(logFile, "", log.LstdFlags)}
+	if e = detach(logFile); e != nil {
+		logger.Printf("a crash of this controller will leave no report: %v", e)
+	}
 	logger.Printf("controller %s started", version)
+	if e = run(root, c, logger); e != nil {
+		logger.Printf("controller stopped: %v", e)
+	}
+	return e
+}
+
+// notStarted appends why a controller did not start to controller.log, which
+// is not open yet, and returns e. A line that cannot be written is lost.
+func notStarted(root string, e error) error {
+	if f, err := os.OpenFile(filepath.Join(root, "controller.log"), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600); err == nil {
+		log.New(f, "", log.LstdFlags).Printf("controller did not start: %v", e)
+		f.Close()
+	}
+	return e
+}
+func serve(root string, c worker.Config, logger *controllerLog) error {
+	var e error
 	var m *lifecycle.Manager
 	var source *partysource.Source
 	if c.HomeAssistantURL != "" {
@@ -309,6 +334,7 @@ func app(root string) error {
 	go func() {
 		select {
 		case <-signals:
+			m.Apply("stop")
 			cancel()
 			t.Quit()
 		case <-ctx.Done():

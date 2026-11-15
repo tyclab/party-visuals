@@ -3,8 +3,11 @@
 The controller owns one NodeCG/browser/capture session. CLI, interactive menu,
 tray and login task address that owner. Manual Off survives sleep, unlock,
 sign-in and retries. Closing the menu leaves visuals running; Stop records Off
-before shutdown. A closed browser or an unclean previous owner leaves visuals
-Off until Start, avoiding a guess about whether an exit was deliberate.
+before shutdown. A closed browser leaves visuals Off until Start, and so does
+a controller that starts in Manual mode with a Start left over, avoiding a guess
+about whether an exit was deliberate. In Follow Party the Start stays across a
+restart of the controller or of Windows: the party state decides whether
+visuals run, so there is nothing to guess.
 
 The executable reuses tycswap's public native tray adapter at the pinned Go
 revision. It does not run tycswap, use its accounts or require WSL. Automatic
@@ -105,6 +108,34 @@ calm and names what it waits for on screen and in the helper's status file
 (`display.wait`, beside `display.ageMs`). The helper's `--status-file` support is
 required before a session can run.
 
+## Keeping the controller running
+
+The **PartyVisuals Controller** task starts the controller at sign-in and asks
+again every minute. While the controller runs, Task Scheduler drops that start
+(the task ignores new instances); after any exit the controller is back within
+a minute. Task Scheduler's restart-on-failure covers a start that failed, not
+an exit, whatever its code. A controller that ran visuals in Follow Party
+resumes them once it knows there is a party: from its first reading where a
+Home Assistant source is configured, from the next `party on` otherwise. In
+Manual mode it comes back Off.
+
+**Stop visuals and quit** therefore ends the controller for at most a minute:
+visuals stay Off, as Stop recorded, and the tray icon returns. To keep the
+controller closed, disable the task first
+(`Disable-ScheduledTask -TaskName 'PartyVisuals Controller'`), then quit.
+
+`controller.log` says why a controller ended. One that cannot start, for
+example because its configuration is refused or another controller holds the
+folder, appends `controller did not start: <error>`; one that gives up later,
+such as on a tray icon Windows does not take, writes
+`controller stopped: <error>`. Both exit with code 1. A crash of the Go runtime
+exits with code 2 and leaves its report (`panic: …` or `Exception 0x…`, then
+every goroutine's stack) in the same file: the task gives the controller's
+standard error no reader, so `app` points it at the log. A `controller
+<version> started` line with none of these before it follows a quit, a
+sign-out or a process that was ended. Only a log that cannot be opened or
+written leaves an exit unexplained.
+
 ## Sign-in restore
 
 Windows can reopen the apps that were open at shutdown or restart when the user
@@ -117,8 +148,9 @@ starts it outside the controller with the kiosk arguments plus
 `--restore-last-session`.
 
 Nothing the controller or the browser launcher starts carries that flag. For
-the first 10 minutes after the controller starts (the login task starts it at
-sign-in), every 3 s while it owns no session, and once just before each Start,
+the first 10 minutes after the controller starts (its task starts it at
+sign-in, and again after an exit), every 3 s while it owns no session, and
+once just before each Start,
 it closes every Chrome browser process in this Windows session whose only
 `--user-data-dir` is the configured `browserProfile` and which carries
 `--restore-last-session`. When the 10 minutes end, a close still in progress
@@ -143,7 +175,8 @@ While one stays open, Start is refused with "A browser window restored by
 Windows at sign-in is open; close it before Start." A window that could not be
 ended is not tried again until the next Start, and is forgotten once it is
 gone. Within the first 10 minutes, the first sweep that finds no restored
-window left returns a Start refused this way to Off; later the refusal stays
+window left returns a Start refused this way to Off, or in Follow Party, which
+keeps its Start across sign-in, tries it again; later the refusal stays
 until the next Start, which sweeps again, or Stop. The Windows setting is left
 as it is; turning it off also avoids the brief window at sign-in.
 
@@ -195,8 +228,12 @@ hash reviewed elsewhere, such as the release job log. After the first Start
 with a Music Assistant player, sign in to Music Assistant once in the dedicated
 browser window.
 
-To update, choose **Stop visuals and quit** in the tray, then run the line again
-with the new tag and `-Cutover`. The active configuration is kept. To change it,
+To update, run the line again with the new tag and `-Cutover`. Cutover asks the
+running controller to quit, waits until it has let go of its folder, registers
+the new one and starts it. Visuals begin Off, also where Follow Party had a
+Start, so Start them again afterwards. A cutover that fails leaves the
+controller's task disabled, as it leaves the legacy tasks: run it again once
+the cause is resolved. The active configuration is kept. To change it,
 for example to add the Home Assistant keys, edit a copy of
 `%LOCALAPPDATA%\PartyVisuals\controller\config.json` and add
 `-ConfigPath <copy>` to that line.
@@ -221,7 +258,8 @@ go tool goversioninfo -64 -o cmd/party-visuals/resource_windows_amd64.syso -mani
 
 The executable stays a console program, not a `-H windowsgui` one, because the
 same file is the CLI and `status`, `start`, `stop`, `quit` and the others print
-to the console. Only `app` detaches: it writes its output to `controller.log`
+to the console. Only `app` detaches: it writes its output to `controller.log`,
+makes that file its standard error handle, where the Go runtime prints a crash,
 and, when it is the only process on its console, as under the login task,
 frees that console (FreeConsole).
 

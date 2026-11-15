@@ -7,19 +7,31 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"runtime/debug"
 	"syscall"
 	"unsafe"
 )
 
+// releaseAppConsole sends the controller's output to log and frees a console
+// only it is on. The Go runtime prints a crash to the standard error handle,
+// not to os.Stderr, so that handle becomes log as well, and the report names
+// every goroutine. The handle is a duplicate that stays open: log closes
+// before the process ends, and a late report must not reach what takes its place.
 func releaseAppConsole(log *os.File) error {
 	os.Stdout, os.Stderr = log, log
+	debug.SetTraceback("all")
 	dll := windows.NewLazySystemDLL("kernel32.dll")
 	var pids [2]uint32
 	count, _, _ := dll.NewProc("GetConsoleProcessList").Call(uintptr(unsafe.Pointer(&pids[0])), 2)
 	if count == 1 {
 		dll.NewProc("FreeConsole").Call()
 	}
-	return nil
+	process := windows.CurrentProcess()
+	var stderr windows.Handle
+	if e := windows.DuplicateHandle(process, windows.Handle(log.Fd()), process, &stderr, 0, false, windows.DUPLICATE_SAME_ACCESS); e != nil {
+		return e
+	}
+	return windows.SetStdHandle(windows.STD_ERROR_HANDLE, stderr)
 }
 
 func newConsole(c *exec.Cmd) {
