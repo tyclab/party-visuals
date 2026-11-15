@@ -71,7 +71,7 @@ func TestConfigWithoutHomeAssistantLeavesFollowPartyUnconfigured(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if c.HomeAssistantURL != "" || c.PartyEntity != "" || c.PartyValue != "" || c.PartyPollMs != 0 {
+	if c.HomeAssistantURL != "" || c.PartyEntity != "" || c.PartyValue != "" || c.PartyPollMs != 0 || c.LightshowEntity != "" || c.LightshowValue != "" {
 		t.Fatalf("defaults applied without a source: %+v", c)
 	}
 }
@@ -82,8 +82,12 @@ func TestHomeAssistantSourceDefaults(t *testing.T) {
 	if e != nil {
 		t.Fatal(e)
 	}
-	if c.PartyEntity != "sensor.house_mode_code" || c.PartyValue != "3" || c.PartyPollMs != 5000 {
+	if c.PartyEntity != "sensor.house_mode_code" || c.PartyValue != "3" || c.PartyPollMs != 5000 || c.LightshowEntity != "" || c.LightshowValue != "" {
 		t.Fatalf("defaults %+v", c)
+	}
+	c, e = Load(writeConfig(t, map[string]any{"homeAssistantUrl": "https://ha.example.invalid", "homeAssistantTokenFile": token, "lightshowEntity": "binary_sensor.engine_visualizer"}))
+	if e != nil || c.LightshowEntity != "binary_sensor.engine_visualizer" || c.LightshowValue != "on" {
+		t.Fatalf("Follow Lightshow defaults %+v, %v", c, e)
 	}
 }
 
@@ -103,6 +107,10 @@ func TestHomeAssistantSourceIsValidated(t *testing.T) {
 		"poll too fast":         {"partyPollMs": 200},
 		"poll too slow":         {"partyPollMs": 120000},
 		"party keys alone":      {"homeAssistantUrl": "", "homeAssistantTokenFile": "", "partyValue": "3"},
+		"lightshow keys alone":  {"homeAssistantUrl": "", "homeAssistantTokenFile": "", "lightshowEntity": "binary_sensor.engine_visualizer"},
+		"lightshow value alone": {"lightshowValue": "on"},
+		"lightshow entity path": {"lightshowEntity": "binary_sensor.x/../../config"},
+		"lightshow no domain":   {"lightshowEntity": "engine_visualizer"},
 	} {
 		v := map[string]any{}
 		for k, x := range good {

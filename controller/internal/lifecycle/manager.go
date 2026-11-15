@@ -43,8 +43,14 @@ type Sweeper interface {
 }
 
 // ErrRestoredOpen refuses Start while such a window is open. A later sweep
-// that leaves none open returns a Start by hand to Off; Follow Party starts again.
+// that leaves none open returns a Start by hand to Off; a follow mode starts again.
 var ErrRestoredOpen = errors.New("A browser window restored by Windows at sign-in is open; close it before Start.")
+
+// Follows reports whether mode follows a source: Follow Party or Follow
+// Lightshow. A follow mode keeps its Start across a new owner.
+func Follows(mode string) bool { return mode == "follow-party" || mode == "follow-lightshow" }
+
+func supported(v Intent) bool { return v.Version == 1 && (v.Mode == "manual" || Follows(v.Mode)) }
 
 type Store interface {
 	Load() (Intent, error)
@@ -73,10 +79,10 @@ func New(store Store, backend Backend, changed func(Status)) (*Manager, error) {
 	if err != nil {
 		return nil, err
 	}
-	if intent.Version != 1 || (intent.Mode != "manual" && intent.Mode != "follow-party") {
+	if !supported(intent) {
 		return nil, errors.New("unsupported controller intent; preserve the file and repair it before starting")
 	}
-	if intent.Requested && intent.Mode != "follow-party" {
+	if intent.Requested && !Follows(intent.Mode) {
 		intent.Requested, intent.ManualOff = false, true
 		if err := store.Save(intent); err != nil {
 			return nil, err
@@ -94,24 +100,37 @@ func (m *Manager) notify(s Status) {
 }
 
 func (m *Manager) Apply(command string) error {
-	return m.apply(command, "", 0)
+	return m.apply(command, "", 0, "")
 }
 
 // Quit is Stop for a controller about to end. An Off that could not be saved
-// refuses it only in Follow Party, where the next controller acts on the Start
+// refuses it only in a follow mode, where the next controller acts on the Start
 // still stored; in Manual mode no controller starts visuals on its own.
 func (m *Manager) Quit() error {
 	e := m.Apply("stop")
-	if e != nil && m.Snapshot().Intent.Mode != "follow-party" {
+	if e != nil && !Follows(m.Snapshot().Intent.Mode) {
 		return nil
 	}
 	return e
 }
-func (m *Manager) apply(command, reason string, expectedGeneration uint64) error {
+
+// Event applies a source's party-on or party-off only while the mode it reads
+// for is selected, so a reading that lands after a mode switch changes nothing.
+func (m *Manager) Event(mode, command string) error {
+	if command != "party-on" && command != "party-off" {
+		return errors.New("a source sends party-on or party-off only")
+	}
+	return m.apply(command, "", 0, mode)
+}
+func (m *Manager) apply(command, reason string, expectedGeneration uint64, forMode string) error {
 	m.mu.Lock()
 	if expectedGeneration != 0 && m.state.Generation != expectedGeneration {
 		m.mu.Unlock()
 		return nil
+	}
+	if forMode != "" && m.state.Intent.Mode != forMode {
+		m.mu.Unlock()
+		return fmt.Errorf("%s is no longer the selected mode", forMode)
 	}
 	if m.closed {
 		m.mu.Unlock()
@@ -125,10 +144,12 @@ func (m *Manager) apply(command, reason string, expectedGeneration uint64) error
 		next.Intent.Requested, next.Intent.ManualOff = true, false
 	case "stop":
 		next.Intent.Requested, next.Intent.ManualOff = false, true
-	case "manual":
-		next.Intent.Mode = "manual"
-	case "follow-party":
-		next.Intent.Mode = "follow-party"
+	case "manual", "follow-party", "follow-lightshow":
+		// The party state came from the other source: only a session that runs or starts keeps it until the new one reads.
+		if Follows(command) && Follows(next.Intent.Mode) && command != next.Intent.Mode && next.Phase != "running" && next.Phase != "starting" {
+			next.Party = false
+		}
+		next.Intent.Mode = command
 	case "party-on":
 		next.Party = true
 	case "party-off":
@@ -167,7 +188,7 @@ func (m *Manager) apply(command, reason string, expectedGeneration uint64) error
 	}
 	m.state = next
 	want := next.Intent.Requested && !next.Intent.ManualOff && !next.Suspended && (next.Intent.Mode == "manual" || next.Party)
-	if want && previousWant && m.state.Phase == "running" {
+	if want && previousWant && (m.state.Phase == "running" || m.state.Phase == "starting") {
 		s := m.state
 		m.mu.Unlock()
 		m.notify(s)
@@ -211,13 +232,13 @@ func (m *Manager) CloseRestored(ctx context.Context) {
 	if err := m.closeRestored(ctx, false); err == nil && m.blocked != 0 {
 		gen := m.blocked
 		m.blocked = 0
-		// A Start by hand returns to Off. Follow Party asked for its Start
+		// A Start by hand returns to Off. A follow mode asked for its Start
 		// itself, at sign-in when Windows restores windows, and tries it again.
 		command := "stop"
-		if m.Snapshot().Intent.Mode == "follow-party" {
+		if Follows(m.Snapshot().Intent.Mode) {
 			command = "restore"
 		}
-		_ = m.apply(command, "", gen)
+		_ = m.apply(command, "", gen, "")
 	}
 }
 func (m *Manager) closeRestored(ctx context.Context, start bool) error {
@@ -331,13 +352,13 @@ func (m *Manager) reconcile(ctx context.Context, gen uint64, want bool) {
 			if err != nil {
 				reason = "Visuals stopped unexpectedly; inspect diagnostics, then Start: " + err.Error()
 			}
-			_ = m.apply("stop", reason, gen)
+			_ = m.apply("stop", reason, gen, "")
 		}
 	}()
 }
 
 // Close ends the session and leaves the intent as it is: only Stop records
-// Off, so an owner that ends on its own does not turn Follow Party off. An
+// Off, so an owner that ends on its own does not turn a follow mode off. An
 // Off that could not be saved before is saved now.
 func (m *Manager) Close() error {
 	m.mu.Lock()

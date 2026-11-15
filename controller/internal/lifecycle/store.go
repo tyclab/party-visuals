@@ -22,7 +22,7 @@ func (s FileStore) Load() (Intent, error) {
 	if err = json.Unmarshal(b, &v); err != nil {
 		return v, fmt.Errorf("intent file is invalid; refusing automatic start: %w", err)
 	}
-	if v.Version != 1 || (v.Mode != "manual" && v.Mode != "follow-party") {
+	if !supported(v) {
 		return v, errors.New("unsupported controller intent; preserve the file and repair it before starting")
 	}
 	return v, nil
