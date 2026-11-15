@@ -6,7 +6,8 @@ $ErrorActionPreference = 'Stop'
 # replaces them with its own. The module loads first, and each of its commands that
 # changes a task throws until a check below replaces it.
 Import-Module ScheduledTasks
-foreach ($name in 'Register-ScheduledTask','Unregister-ScheduledTask','Set-ScheduledTask','Enable-ScheduledTask','Disable-ScheduledTask','Start-ScheduledTask','Stop-ScheduledTask') {
+$guarded = 'Register-ScheduledTask','Unregister-ScheduledTask','Set-ScheduledTask','Enable-ScheduledTask','Disable-ScheduledTask','Start-ScheduledTask','Stop-ScheduledTask'
+foreach ($name in $guarded) {
     Set-Item -Path "function:global:$name" -Value ([scriptblock]::Create("throw 'the test reached the real $name'"))
 }
 $sandbox = Join-Path ([IO.Path]::GetTempPath()) ('party-controller-test-' + [guid]::NewGuid().ToString('N'))
@@ -79,7 +80,7 @@ try {
     $running = [pscustomobject]@{ TaskName = $ControllerTask; Actions = @([pscustomobject]@{ Execute = (Join-Path $sandbox 'releases\abc\party-visuals.exe'); Arguments = '' }) }
     function Get-ScheduledTask($TaskName) { return $running }
     function Disable-ScheduledTask($TaskName) { $script:events += 'disabled' }
-    function Enable-ScheduledTask($TaskName) { $script:events += 'enabled' }
+    $realQuit = ${function:Send-ControllerQuit}
     function Send-ControllerQuit($Exe) { $script:events += 'quit' }
     function Wait-ControllerReady($Exe) { $script:events += 'ready' }
     Save-ControllerJson $path @{ version = 1; manualOff = $false; requested = $true; mode = 'follow-party' }
@@ -91,7 +92,18 @@ try {
     $script:events = @()
     $failed = $false
     try { Cutover-Controller $journal } catch { $failed = $true }
-    Check 'a cutover that fails before registration gives the old task its minute check back' ($failed -and ($script:events -join ',') -eq 'check,disabled,quit,enabled')
+    $held = $false
+    try { (Enter-ControllerOwnership).Dispose() } catch { $held = $true }
+    Check 'a cutover that fails leaves the task disabled and lets go of the lock' ($failed -and ($script:events -join ',') -eq 'check,disabled,quit' -and -not $held)
+    $ControllerStopSeconds = 1
+    $owner = Enter-ControllerOwnership
+    $script:events = @()
+    $message = ''
+    try { Cutover-Controller $journal } catch { $message = $_.Exception.Message } finally { $owner.Dispose() }
+    Check 'a controller that keeps its lock stops the cutover before anything is registered' ($message -like 'The running controller has not stopped*' -and ($script:events -join ',') -eq 'check,disabled,quit')
+    $skipped = $true
+    try { & $realQuit (Join-Path $sandbox 'releases\gone\party-visuals.exe') } catch { $skipped = $false }
+    Check 'a quit to a controller whose executable is gone is skipped, not an error' $skipped
     $script:events = @()
     function Get-ScheduledTask($TaskName) { return $null }
     function Register-ScheduledTask($TaskName,$Xml,[switch]$Force) { $script:events += 'restore' }
@@ -102,4 +114,9 @@ try {
     $loaded=Get-Content -LiteralPath $path -Raw|ConvertFrom-Json
     Check 'rollback restores definitions disabled and preserves current Off' (($script:events -join ',') -eq 'restore,disabled' -and $loaded.manualOff -and -not $loaded.requested -and $journal.phase -eq 'rolled-back-off')
     Write-Host "Passed $script:checks controller installer checks. No real task was registered or stopped."
-} finally { Remove-Item -LiteralPath $sandbox -Recurse -Force }
+} finally {
+    Remove-Item -LiteralPath $sandbox -Recurse -Force
+    # Called with &, the throwing commands would stay in the caller's session.
+    foreach ($name in $guarded) { Remove-Item -Path "function:global:$name" -ErrorAction SilentlyContinue }
+    Import-Module ScheduledTasks -Force
+}

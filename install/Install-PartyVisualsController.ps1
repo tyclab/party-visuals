@@ -14,6 +14,8 @@ $ControllerTask = 'PartyVisuals Controller'
 $LegacyTasks = @('PartyVisuals Browser','PartyVisuals NodeCG')
 $StateRoot = Join-Path $Root 'controller'
 $JournalPath = Join-Path $StateRoot 'migration.json'
+# Twice what a controller takes at most to end its session: 45 s for the worker and two waits of 5 s for its exit.
+$ControllerStopSeconds = 110
 
 function Save-ControllerJson([string] $Path, $Value) {
     $temp = $Path + '.new'
@@ -173,21 +175,23 @@ function Register-ControllerTask([string] $Exe) {
     Register-ScheduledTask -TaskName $ControllerTask -Action $task.Action -Trigger $task.Triggers -Settings $task.Settings -User $task.User -RunLevel Limited -Force | Out-Null
 }
 function Send-ControllerQuit([string] $Exe) {
+    if (-not (Test-Path -LiteralPath $Exe -PathType Leaf)) { return }
     $priorErrorPreference = $ErrorActionPreference
     try { $ErrorActionPreference = 'Continue'; & $Exe --root $StateRoot quit 2>$null | Out-Null } finally { $ErrorActionPreference = $priorErrorPreference }
 }
-# Stop-RunningController disables the controller's task, so its minute check starts
-# nothing meanwhile, asks the controller to quit and waits until it has let go of
-# its lock.
+# Stop-RunningController returns the controller's lock. Where the controller's task
+# exists it disables it first, so its minute check starts nothing meanwhile, asks
+# the controller to quit and waits for the lock. The task stays disabled until
+# Cutover registers it again.
 function Stop-RunningController([string] $StillRunning) {
     $task = Get-ScheduledTask -TaskName $ControllerTask -ErrorAction SilentlyContinue
     Assert-OwnedTask $task (Join-Path $StateRoot 'releases\')
-    if ($null -eq $task) { return }
+    if ($null -eq $task) { return Enter-ControllerOwnership }
     Disable-ScheduledTask -TaskName $ControllerTask | Out-Null
     Send-ControllerQuit $task.Actions[0].Execute
-    $until = [datetime]::UtcNow.AddSeconds(60)
+    $until = [datetime]::UtcNow.AddSeconds($ControllerStopSeconds)
     do {
-        try { (Enter-ControllerOwnership).Dispose(); return } catch { Start-Sleep -Milliseconds 200 }
+        try { return Enter-ControllerOwnership } catch { Start-Sleep -Milliseconds 200 }
     } while ([datetime]::UtcNow -lt $until)
     throw $StillRunning
 }
@@ -211,11 +215,7 @@ function Wait-ControllerReady([string] $Exe) {
 }
 function Cutover-Controller($Journal) {
     Test-ControllerBinary $Journal.exe (Split-Path -Parent $Journal.config)
-    $had = $null -ne (Get-ScheduledTask -TaskName $ControllerTask -ErrorAction SilentlyContinue)
-    $registered = $false
-    try {
-    Stop-RunningController 'The running controller has not stopped. Stop it, then retry Cutover.'
-    $guard = Enter-ControllerOwnership
+    $guard = Stop-RunningController 'The running controller has not stopped; its task stays disabled. Stop it, then retry Cutover.'
     try {
     Save-ControllerJson (Join-Path $StateRoot 'config.json') (Get-Content -LiteralPath $Journal.config -Raw | ConvertFrom-Json)
     # Visuals begin Off: the new controller keeps a Start that Follow Party had.
@@ -234,21 +234,15 @@ function Cutover-Controller($Journal) {
     }
     $Journal.phase = 'legacy-stopped'; Save-ControllerJson $JournalPath $Journal
     Register-ControllerTask $Journal.exe
-    $registered = $true
     $Journal.phase = 'registered'; Save-ControllerJson $JournalPath $Journal
     } finally { $guard.Dispose() }
-    } finally {
-        # A cutover that fails before the new task exists gives the old one its minute check back.
-        if ($had -and -not $registered) { Enable-ScheduledTask -TaskName $ControllerTask | Out-Null }
-    }
     Start-ScheduledTask -TaskName $ControllerTask
     Wait-ControllerReady $Journal.exe
     $Journal.phase = 'active'; Save-ControllerJson $JournalPath $Journal
     Write-Host 'Controller activated. Start visuals explicitly from the tray or CLI; rig controls were not changed.'
 }
 function Rollback-Controller($Journal) {
-    Stop-RunningController 'New owner has not stopped; prior supervisors remain disabled.'
-    $guard = Enter-ControllerOwnership
+    $guard = Stop-RunningController 'New owner has not stopped; prior supervisors remain disabled.'
     try {
     Save-ControllerOff
     foreach ($record in $Journal.tasks) {
