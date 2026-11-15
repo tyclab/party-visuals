@@ -155,15 +155,19 @@ async function openPage(t, script) {
       canvas: document.querySelector('[data-party-visualizer-canvas]').width,
       opacity: Number(getComputedStyle(document.querySelector('[data-party-visualizer-layer]')).opacity), status: document.querySelector('[role="status"]').textContent };
   }, since);
-  return { page, look, outside, errors, open: () => page.goto(`${origin}/bundles/party-visuals/graphics/milkdrop.html`) };
+  // Each test needs a Chromium that draws WebGL 2; without one it says so instead of failing on the page's `webgl`.
+  const open = async () => {
+    await page.goto(`${origin}/bundles/party-visuals/graphics/milkdrop.html`);
+    assert.equal(await page.evaluate(() => !!document.createElement('canvas').getContext('webgl2')), true,
+      'this Chromium draws no WebGL 2: see PARTY_VISUALS_BROWSER_CHANNEL in this file');
+  };
+  return { page, look, outside, errors, open };
 }
 
 test('the live-audio page draws from the live input, goes calm on silence and on a refused or hung endpoint, survives a lost context and a restart, and asks nothing beyond its origin', { timeout: 120_000 }, async (t) => {
   const { sound } = shared;
   const { page, look, outside, errors, open } = await openPage(t);
   await open();
-  assert.equal(await page.evaluate(() => !!document.createElement('canvas').getContext('webgl2')), true,
-    'this Chromium draws no WebGL 2: see PARTY_VISUALS_BROWSER_CHANNEL in this file');
   // Any render since `count` handed loud samples, and the renderer's own band energy rose with them. On a slow
   // renderer many frames get silence, the bound holding, so not every frame has to.
   const loudAfter = (count) => until(async () => { const now = await look(count); return now.frames > count + 10 && now.loud > 30 && now.energy > 1 && now; },
