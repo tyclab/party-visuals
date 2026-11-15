@@ -232,7 +232,7 @@ func serve(root string, c worker.Config, logger *controllerLog) error {
 	command := func(command string) error {
 		switch command {
 		case "quit":
-			if e := m.Apply("stop"); e != nil {
+			if e := m.Quit(); e != nil {
 				return e
 			}
 			go func() {

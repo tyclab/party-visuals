@@ -96,6 +96,17 @@ func (m *Manager) notify(s Status) {
 func (m *Manager) Apply(command string) error {
 	return m.apply(command, "", 0)
 }
+
+// Quit is Stop for a controller about to end. An Off that could not be saved
+// refuses it only in Follow Party, where the next controller acts on the Start
+// still stored; in Manual mode no controller starts visuals on its own.
+func (m *Manager) Quit() error {
+	e := m.Apply("stop")
+	if e != nil && m.Snapshot().Intent.Mode != "follow-party" {
+		return nil
+	}
+	return e
+}
 func (m *Manager) apply(command, reason string, expectedGeneration uint64) error {
 	m.mu.Lock()
 	if expectedGeneration != 0 && m.state.Generation != expectedGeneration {
@@ -335,7 +346,7 @@ func (m *Manager) Close() error {
 		if owed = m.store.Save(m.state.Intent); owed == nil {
 			m.saved = m.state.Intent
 		} else {
-			owed = fmt.Errorf("Off was not saved, so the next controller finds the Start: %w", owed)
+			owed = fmt.Errorf("Off was not saved, the stored intent still holds the Start: %w", owed)
 		}
 	}
 	m.closed = true
@@ -349,5 +360,8 @@ func (m *Manager) Close() error {
 	m.session = nil
 	m.run.Unlock()
 	m.wg.Wait()
+	if owed != nil && err != nil {
+		return fmt.Errorf("%w; %w", owed, err)
+	}
 	return errors.Join(owed, err)
 }

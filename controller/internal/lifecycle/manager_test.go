@@ -30,6 +30,7 @@ type fakeBackend struct {
 	gate     chan struct{}
 	starting chan struct{}
 	stopErr  error
+	deaf     bool // Start waits for gate only: it finishes after its context ended
 }
 
 func (b *fakeBackend) Start(ctx context.Context) (Session, error) {
@@ -39,7 +40,9 @@ func (b *fakeBackend) Start(ctx context.Context) (Session, error) {
 		default:
 		}
 	}
-	if b.gate != nil {
+	if b.gate != nil && b.deaf {
+		<-b.gate
+	} else if b.gate != nil {
 		select {
 		case <-b.gate:
 		case <-ctx.Done():
@@ -116,7 +119,7 @@ func TestStopCancelsPendingStart(t *testing.T) {
 	}
 }
 func TestAQuitWhileStartingLeavesNoSessionAndSavesOff(t *testing.T) {
-	b := &fakeBackend{gate: make(chan struct{}), starting: make(chan struct{}, 1)}
+	b := &fakeBackend{gate: make(chan struct{}), starting: make(chan struct{}, 1), deaf: true}
 	store := FileStore{filepath.Join(t.TempDir(), "intent.json")}
 	m, e := New(store, b, nil)
 	if e != nil {
@@ -124,12 +127,15 @@ func TestAQuitWhileStartingLeavesNoSessionAndSavesOff(t *testing.T) {
 	}
 	m.Apply("start")
 	<-b.starting
-	if e = m.Apply("stop"); e != nil {
+	if e = m.Quit(); e != nil {
 		t.Fatal(e)
 	}
 	close(b.gate)
 	if e = m.Close(); e != nil {
 		t.Fatal(e)
+	}
+	if b.count() != 1 {
+		t.Fatalf("the start made %d sessions, not the one that finishes late", b.count())
 	}
 	for _, s := range b.sessions {
 		select {
@@ -420,6 +426,61 @@ func TestCloseSaysThatTheOffItOwesWasNotSaved(t *testing.T) {
 	}
 	if e := m.Close(); e != nil {
 		t.Fatalf("a second Close returned %v", e)
+	}
+}
+
+func TestCloseNamesAnUnsavedOffAndAWorkerThatDidNotStopOnOneLine(t *testing.T) {
+	store := &failingStore{FileStore: FileStore{Path: filepath.Join(t.TempDir(), "intent.json")}}
+	m, e := New(store, &fakeBackend{stopErr: errors.New("owned worker did not exit")}, nil)
+	if e != nil {
+		t.Fatal(e)
+	}
+	m.Apply("start")
+	eventually(t, func() bool { return m.Snapshot().Phase == "running" })
+	store.fail = true
+	m.Apply("stop")
+	e = m.Close()
+	if e == nil || !strings.Contains(e.Error(), "Off was not saved") || !strings.Contains(e.Error(), "owned worker did not exit") || strings.Contains(e.Error(), "\n") {
+		t.Fatalf("Close returned %q", e)
+	}
+}
+
+func TestAQuitIsRefusedOverAnUnsavedOffOnlyInFollowParty(t *testing.T) {
+	for mode, refused := range map[string]bool{"manual": false, "follow-party": true} {
+		t.Run(mode, func(t *testing.T) {
+			store := &failingStore{FileStore: FileStore{Path: filepath.Join(t.TempDir(), "intent.json")}}
+			b := &fakeBackend{}
+			m, e := New(store, b, nil)
+			if e != nil {
+				t.Fatal(e)
+			}
+			m.Apply(mode)
+			m.Apply("start")
+			m.Apply("party-on")
+			eventually(t, func() bool { return m.Snapshot().Phase == "running" })
+			store.fail = true
+			for _, attempt := range []string{"first", "second"} {
+				if e = m.Quit(); (e != nil) != refused {
+					t.Fatalf("the %s quit answered %v", attempt, e)
+				}
+			}
+			m.Close()
+			select {
+			case <-b.sessions[0].stopped:
+			default:
+				t.Fatal("the quit left the visuals running")
+			}
+			// Why the two differ: what the next controller does with the Start still stored.
+			store.fail = false
+			next, e := New(store, &fakeBackend{}, nil)
+			if e != nil {
+				t.Fatal(e)
+			}
+			defer next.Close()
+			if i := next.Snapshot().Intent; i.Requested != refused {
+				t.Fatalf("the next controller holds %+v", i)
+			}
+		})
 	}
 }
 
