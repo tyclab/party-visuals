@@ -20,6 +20,7 @@
       this.round = [];
       this.current = null;
       this.shownMs = 0;
+      this.failed = [];
     }
 
     next() {
@@ -35,6 +36,22 @@
       this.current = this.round.pop();
       this.shownMs = 0;
       return this.current;
+    }
+
+    /** The next preset `load(name)` takes; one it throws on is counted in `failed` and left out from then on. Null when none loads. */
+    load(load) {
+      while (this.names.length) {
+        const name = this.next();
+        try {
+          load(name);
+          return name;
+        } catch {
+          this.failed.push(name);
+          this.names = this.names.filter((n) => n !== name);
+          this.round = this.round.filter((n) => n !== name);
+        }
+      }
+      return null;
     }
 
     /** `ms` more of the picture showing; true when the next preset is due. */

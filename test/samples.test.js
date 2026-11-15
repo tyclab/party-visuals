@@ -159,7 +159,7 @@ function simulate({ seconds, drift = 0, startHours = 0, seed = 7 }) {
 
 for (const [label, options] of [
   ['the first minute, sound card fast', { seconds: 60, drift: 0.001 }],
-  ['two hours, sound card fast', { seconds: 2 * 3600, drift: 0.001, seed: 11 }],
+  ['four hours, sound card fast', { seconds: 4 * 3600, drift: 0.001, seed: 11 }],
   ['the first minute, sound card slow', { seconds: 60, drift: -0.001 }],
   ['a minute after four hours, sound card slow', { seconds: 60, drift: -0.001, startHours: 4 }],
 ]) {
@@ -295,4 +295,16 @@ test('a ring keeps one process\'s newest samples, contiguous, and starts again o
   assert.deepEqual([ring.g, ring.start, ring.end], [2, 0, 3]);
   for (const bad of [{ g: 2, end: 2, rate: RATE, samples: Int16Array.of(1, 2, 3) }, { g: 2, end: 9, rate: 0, samples: Int16Array.of(1) },
     { g: 'x', end: 9, rate: RATE, samples: Int16Array.of(1) }, { g: 2, end: 9, rate: RATE, samples: [1] }]) assert.equal(ring.take(bad, 0, 0), false);
+});
+
+test('an answer the page cannot read is an error of its own, an empty one is nothing newer', () => {
+  const page = new LivePageFeed(), data = Buffer.from(new Int16Array(HOP).fill(5000).buffer).toString('base64');
+  const good = { g: 1, end: HOP, rate: RATE, ageMs: 0, heldMs: 0, data };
+  for (const bad of [null, 'text', { ...good, data: 1 }, { ...good, data: '@@@@' }, { ...good, data: 'AA==' }, { ...good, data: data.slice(0, -1) },
+    { ...good, g: null }, { ...good, end: 'x' }, { ...good, rate: 0 }, { ...good, end: 2 }, { ...good, ageMs: null }]) {
+    assert.throws(() => page.take(bad, 0, 0), TypeError, JSON.stringify(bad));
+  }
+  assert.equal(page.take({ wait: 'audio', g: null, end: 0, rate: 0, ageMs: null, data: '' }, 0, 0), false, 'a wait with no samples');
+  assert.equal(page.take(good, 0, 0), true);
+  assert.equal(page.take(good, 0, 0), false, 'nothing newer');
 });

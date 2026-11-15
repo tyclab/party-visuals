@@ -8,6 +8,10 @@ Read for this topic; paths below are relative to the repository root unless stat
 - Music Assistant 2.10.7 drives its visualizer from queue buffers. Connect traffic
   and audio that bypass those queues can play while the visualization stays black.
   Verify the current version and playback path before diagnosing rendering.
+- Updating a show PC to the live-audio page goes engine, capture helper, bundle,
+  configuration, in that order (README, Updating a show PC): an older helper refuses
+  the page's address and an older engine sends no samples. Lightshow has no releases;
+  name the commit (`91d0b405` or later).
 - The live-audio page (`graphics/milkdrop.html`) draws from the engine's live input
   instead. A calm page names its wait on screen and in `data-party-wait` (also the
   helper's log): check that before the capture path. Its timing bound, idle rule and

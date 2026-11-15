@@ -24,7 +24,7 @@
   const PULL_TIMEOUT_MS = 2000;
   const AGE_WINDOW_MS = 5000;
   /** What the page can wait for, the page's own first. */
-  const WAITS = ['webgl', 'context', 'nodecg', 'busy', 'endpoint', 'lightshow', 'live-input', 'audio', 'silence'];
+  const WAITS = ['webgl', 'renderer', 'presets', 'context', 'nodecg', 'busy', 'endpoint', 'data', 'lightshow', 'live-input', 'audio', 'silence'];
 
   /** How late a packet lands against the quickest of the last few seconds, whatever the two clocks read. */
   class ArrivalClock {
@@ -100,6 +100,7 @@
 
   function decode(text) {
     const raw = atob(text || ''), out = new Int16Array(raw.length >> 1);
+    if (raw.length % 2) throw new TypeError('half a sample');
     for (let i = 0; i < out.length; i++) out[i] = ((raw.charCodeAt(2 * i) | (raw.charCodeAt(2 * i + 1) << 8)) << 16) >> 16;
     return out;
   }
@@ -115,11 +116,20 @@
       return this.ring.g === null ? '' : `?g=${this.ring.g}&after=${this.ring.end}`;
     }
 
-    /** An answer to a pull asked at `askedMs`, read at `nowMs`: behind by the extension's count plus the trip not spent held there. */
+    /**
+     * An answer to a pull asked at `askedMs`, read at `nowMs`: behind by the extension's count plus the trip not
+     * spent held there. False when it brings nothing newer; a TypeError for an answer this page cannot read.
+     */
     take(body, nowMs, askedMs) {
-      if (!body || typeof body.data !== 'string' || !Number.isFinite(body.ageMs)) return false;
+      if (!body || typeof body !== 'object' || typeof body.data !== 'string') throw new TypeError('not an answer of api/samples');
+      let samples;
+      try { samples = decode(body.data); } catch { throw new TypeError('samples that are not base64'); }
+      if (!samples.length) return false;
+      if (body.data.length % 4 || !Number.isSafeInteger(body.g) || !Number.isSafeInteger(body.end) || !(body.rate > 0) || samples.length > body.end || !Number.isFinite(body.ageMs)) {
+        throw new TypeError('samples without a stream, a place in it, a rate or an age');
+      }
       const trip = Math.max(0, nowMs - askedMs - (Number.isFinite(body.heldMs) ? body.heldMs : 0));
-      return this.ring.take({ g: body.g, end: body.end, rate: body.rate, samples: decode(body.data), at: body.at }, nowMs, body.ageMs + trip);
+      return this.ring.take({ g: body.g, end: body.end, rate: body.rate, samples, at: body.at }, nowMs, body.ageMs + trip);
     }
 
     /** The newest samples as the renderer's bytes, or null to draw silence; `wallMs` only feeds the age diagnostic. */

@@ -83,7 +83,7 @@ param(
 
     [Parameter(ParameterSetName = 'Install')]
     [ValidatePattern('^([0-9a-f]{40}|v\d+\.\d+\.\d+[0-9A-Za-z.-]*)$')]
-    [string] $BundleRef = 'e9395d8a0571346913d8010e2845c6729b68cd7b',
+    [string] $BundleRef = 'da1c162ba050d2651825aa72cb0d66a60d162b81',
 
     [Parameter(ParameterSetName = 'Install')]
     [switch] $NewToken,
