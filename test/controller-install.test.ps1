@@ -2,6 +2,13 @@
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 . (Join-Path $PSScriptRoot '..\install\Install-PartyVisualsController.ps1')
+# Run with -File, this script's functions are global and a module that loads later
+# replaces them with its own. The module loads first, and each of its commands that
+# changes a task throws until a check below replaces it.
+Import-Module ScheduledTasks
+foreach ($name in 'Register-ScheduledTask','Unregister-ScheduledTask','Set-ScheduledTask','Enable-ScheduledTask','Disable-ScheduledTask','Start-ScheduledTask','Stop-ScheduledTask') {
+    Set-Item -Path "function:global:$name" -Value ([scriptblock]::Create("throw 'the test reached the real $name'"))
+}
 $sandbox = Join-Path ([IO.Path]::GetTempPath()) ('party-controller-test-' + [guid]::NewGuid().ToString('N'))
 New-Item -ItemType Directory -Path $sandbox | Out-Null
 $Root = $sandbox
@@ -47,6 +54,10 @@ try {
     $refused = $false
     try { Assert-OwnedTask $owned $expected } catch { $refused = $true }
     Check 'mentioning owned filename does not grant takeover' $refused
+    function Get-ScheduledTask($TaskName) { return $null }
+    $task = New-ControllerTaskDefinition (Join-Path $sandbox 'releases\abc\party-visuals.exe')
+    $watch = @($task.Triggers | Where-Object { $_.Repetition -and $_.Repetition.Interval -eq 'PT1M' })
+    Check 'the task starts at logon and asks every minute without end, ignoring the start while the controller runs' ($task.Triggers.Count -eq 2 -and $watch.Count -eq 1 -and -not $watch[0].Repetition.Duration -and "$($task.Settings.MultipleInstances)" -eq 'IgnoreNew' -and $task.Action.Arguments -eq ('--root "' + $sandbox + '" app'))
     $script:events = @()
     function Test-ControllerBinary($Exe) { $script:events += 'check' }
     function Register-ControllerTask($Exe) { $script:events += 'register'; $guard = Enter-ControllerOwnership; $guard.Dispose() }
@@ -65,6 +76,22 @@ try {
     $failed = $false
     try { Cutover-Controller $journal } catch { $failed = $true }
     Check 'unreachable owner is never reported active' ($failed -and $journal.phase -eq 'registered')
+    $running = [pscustomobject]@{ TaskName = $ControllerTask; Actions = @([pscustomobject]@{ Execute = (Join-Path $sandbox 'releases\abc\party-visuals.exe'); Arguments = '' }) }
+    function Get-ScheduledTask($TaskName) { return $running }
+    function Disable-ScheduledTask($TaskName) { $script:events += 'disabled' }
+    function Enable-ScheduledTask($TaskName) { $script:events += 'enabled' }
+    function Send-ControllerQuit($Exe) { $script:events += 'quit' }
+    function Wait-ControllerReady($Exe) { $script:events += 'ready' }
+    Save-ControllerJson $path @{ version = 1; manualOff = $false; requested = $true; mode = 'follow-party' }
+    $script:events = @()
+    Cutover-Controller $journal
+    $loaded = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
+    Check 'cutover stops the running controller before it takes the lock, and visuals begin Off' (($script:events -join ',') -eq 'check,disabled,quit,registered,start,ready' -and $loaded.manualOff -and -not $loaded.requested -and $journal.phase -eq 'active')
+    function Register-ControllerTask($Exe) { throw 'registration refused' }
+    $script:events = @()
+    $failed = $false
+    try { Cutover-Controller $journal } catch { $failed = $true }
+    Check 'a cutover that fails before registration gives the old task its minute check back' ($failed -and ($script:events -join ',') -eq 'check,disabled,quit,enabled')
     $script:events = @()
     function Get-ScheduledTask($TaskName) { return $null }
     function Register-ScheduledTask($TaskName,$Xml,[switch]$Force) { $script:events += 'restore' }
