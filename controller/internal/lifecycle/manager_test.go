@@ -115,6 +115,34 @@ func TestStopCancelsPendingStart(t *testing.T) {
 		}
 	}
 }
+func TestAQuitWhileStartingLeavesNoSessionAndSavesOff(t *testing.T) {
+	b := &fakeBackend{gate: make(chan struct{}), starting: make(chan struct{}, 1)}
+	store := FileStore{filepath.Join(t.TempDir(), "intent.json")}
+	m, e := New(store, b, nil)
+	if e != nil {
+		t.Fatal(e)
+	}
+	m.Apply("start")
+	<-b.starting
+	if e = m.Apply("stop"); e != nil {
+		t.Fatal(e)
+	}
+	close(b.gate)
+	if e = m.Close(); e != nil {
+		t.Fatal(e)
+	}
+	for _, s := range b.sessions {
+		select {
+		case <-s.stopped:
+		default:
+			t.Fatal("a start that finished late survived the quit")
+		}
+	}
+	if v, e := store.Load(); e != nil || !v.ManualOff || v.Requested {
+		t.Fatalf("the store holds %+v, %v", v, e)
+	}
+}
+
 func TestDuplicateStartDoesNotReplaceSession(t *testing.T) {
 	b := &fakeBackend{}
 	m, _ := newManager(t, b)
@@ -324,6 +352,74 @@ func TestStopStillEndsSessionWhenPersistenceFails(t *testing.T) {
 	}
 	if !m.Snapshot().Intent.ManualOff {
 		t.Fatal("runtime Off lost")
+	}
+}
+
+// owedOff runs a Follow Party session and stops it while the store refuses.
+func owedOff(t *testing.T) (*Manager, *failingStore) {
+	t.Helper()
+	store := &failingStore{FileStore: FileStore{Path: filepath.Join(t.TempDir(), "intent.json")}}
+	m, e := New(store, &fakeBackend{}, nil)
+	if e != nil {
+		t.Fatal(e)
+	}
+	t.Cleanup(func() { m.Close() })
+	m.Apply("follow-party")
+	m.Apply("start")
+	m.Apply("party-on")
+	eventually(t, func() bool { return m.Snapshot().Phase == "running" })
+	store.fail = true
+	if e = m.Apply("stop"); e == nil {
+		t.Fatal("failed save reported success")
+	}
+	return m, store
+}
+
+func settled(t *testing.T, m *Manager) Status {
+	t.Helper()
+	eventually(t, func() bool { p := m.Snapshot().Phase; return p != "stopping" && p != "starting" })
+	return m.Snapshot()
+}
+
+func TestAnOffStillOwedIsSaidUntilItIsSaved(t *testing.T) {
+	m, store := owedOff(t)
+	owed := func(after string) {
+		t.Helper()
+		if s := settled(t, m); s.Phase != "attention" || !strings.HasPrefix(s.Reason, "Could not persist Off") {
+			t.Fatalf("after %s the Off still owed is shown as %q %q", after, s.Phase, s.Reason)
+		}
+	}
+	owed("the Stop")
+	if e := m.Apply("stop"); e == nil {
+		t.Fatal("a second Stop whose Off was not saved either reported success")
+	}
+	owed("a second Stop")
+	if e := m.Apply("manual"); e == nil || m.Snapshot().Intent.Mode != "follow-party" {
+		t.Fatalf("a mode that could not be saved was taken: %v, %+v", e, m.Snapshot().Intent)
+	}
+	if e := m.Apply("party-off"); e != nil {
+		t.Fatalf("a party event was refused over the Off still owed: %v", e)
+	}
+	owed("a party event")
+	store.fail = false
+	if e := m.Apply("party-on"); e != nil {
+		t.Fatal(e)
+	}
+	if s := settled(t, m); s.Phase != "off" || s.Reason != "" {
+		t.Fatalf("the Off, now saved, is shown as %q %q", s.Phase, s.Reason)
+	}
+	if v, e := store.Load(); e != nil || !v.ManualOff || v.Requested || v.Mode != "follow-party" {
+		t.Fatalf("the store holds %+v, %v", v, e)
+	}
+}
+
+func TestCloseSaysThatTheOffItOwesWasNotSaved(t *testing.T) {
+	m, _ := owedOff(t)
+	if e := m.Close(); e == nil || !strings.Contains(e.Error(), "Off was not saved") || !strings.Contains(e.Error(), "disk refused") {
+		t.Fatalf("Close of a controller that owes an Off returned %v", e)
+	}
+	if e := m.Close(); e != nil {
+		t.Fatalf("a second Close returned %v", e)
 	}
 }
 

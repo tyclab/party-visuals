@@ -300,7 +300,7 @@ func serve(root string, c worker.Config, logger *controllerLog) error {
 	if e != nil {
 		return e
 	}
-	defer m.Close()
+	defer closing(m, logger)
 	server, e := owner.Listen(root, status, logger.command("cli", command))
 	if e != nil {
 		return e
@@ -344,6 +344,14 @@ func serve(root string, c worker.Config, logger *controllerLog) error {
 		return e
 	}
 	return t.Run()
+}
+
+// closing ends m. What it could not do, an Off left unsaved or a worker that
+// did not stop, goes to controller.log: nothing else hears of it.
+func closing(m *lifecycle.Manager, logger *controllerLog) {
+	if e := m.Close(); e != nil {
+		logger.Printf("controller closed: %v", e)
+	}
 }
 
 // startManager loads the intent and, for sweepFor or until ctx ends, closes

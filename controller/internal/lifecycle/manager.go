@@ -3,6 +3,7 @@ package lifecycle
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -42,7 +43,7 @@ type Sweeper interface {
 }
 
 // ErrRestoredOpen refuses Start while such a window is open. A later sweep
-// that leaves none open returns the controller to Off.
+// that leaves none open returns a Start by hand to Off; Follow Party starts again.
 var ErrRestoredOpen = errors.New("A browser window restored by Windows at sign-in is open; close it before Start.")
 
 type Store interface {
@@ -135,20 +136,23 @@ func (m *Manager) apply(command, reason string, expectedGeneration uint64) error
 		switch {
 		case err == nil:
 			m.saved = next.Intent
-		case next.Intent == m.state.Intent:
-			// An Off that could not be saved stays owed; this command does not fail over it.
-		case command != "stop":
-			m.mu.Unlock()
-			return err
-		default:
+		case command == "stop":
 			persistenceError = err
 			reason = "Could not persist Off; visuals stopped: " + err.Error()
+		case next.Intent == m.state.Intent:
+			// The Off stays owed. This command does not fail over it; the status keeps saying so.
+			if reason == "" {
+				reason = "Could not persist Off; visuals stopped: " + err.Error()
+			}
+		default:
+			m.mu.Unlock()
+			return err
 		}
 	}
 	next.Reason = reason
 	if next == m.state && command != "restore" && !(command == "start" && m.state.Phase == "attention") {
 		m.mu.Unlock()
-		return nil
+		return persistenceError
 	}
 	m.state = next
 	want := next.Intent.Requested && !next.Intent.ManualOff && !next.Suspended && (next.Intent.Mode == "manual" || next.Party)
@@ -330,6 +334,8 @@ func (m *Manager) Close() error {
 	if !m.closed && m.state.Intent != m.saved {
 		if owed = m.store.Save(m.state.Intent); owed == nil {
 			m.saved = m.state.Intent
+		} else {
+			owed = fmt.Errorf("Off was not saved, so the next controller finds the Start: %w", owed)
 		}
 	}
 	m.closed = true
