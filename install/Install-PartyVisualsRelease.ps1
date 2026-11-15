@@ -120,7 +120,7 @@ function Assert-Prerequisites($Config) {
     if (-not (Test-Path -LiteralPath $Config.nodeExe -PathType Leaf)) { $missing += "Node.js 22 or later ($($Config.nodeExe)): winget install --id OpenJS.NodeJS.LTS --exact" }
     if (-not (Test-Path -LiteralPath $Config.chromeExe -PathType Leaf)) { $missing += "Chrome ($($Config.chromeExe)): winget install --id Google.Chrome --exact" }
     if (-not (Test-Path -LiteralPath (Join-Path $Config.nodecgRoot 'start.js') -PathType Leaf)) { $missing += "NodeCG with this bundle ($($Config.nodecgRoot)): Install-PartyVisuals.ps1 -LightshowUrl http://<engine host>:3000, without -Autostart" }
-    if (-not (Test-Path -LiteralPath $Config.helperPath -PathType Leaf)) { $missing += "Capture helper ($($Config.helperPath)): tools/browser-visuals of the matching Lightshow release, then npm.cmd ci --omit=dev" }
+    if (-not (Test-Path -LiteralPath $Config.helperPath -PathType Leaf)) { $missing += "Capture helper ($($Config.helperPath)): tools/browser-visuals of TycStation Lightshow commit 91d0b405 or later, then npm.cmd ci --omit=dev --ignore-scripts" }
     $page = Join-Path $Config.nodecgRoot 'bundles\party-visuals\graphics\milkdrop.html'
     if ($Config.visualizerUrl -eq $LiveAudioUrl -and -not (Test-Path -LiteralPath $page -PathType Leaf)) { $missing += "The live-audio page ($page): update this bundle with Install-PartyVisuals.ps1" }
     if ($missing.Count) { throw ("Install these first (controller/README.md, Installation), then run this again:`n  " + ($missing -join "`n  ")) }

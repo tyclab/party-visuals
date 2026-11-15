@@ -147,9 +147,11 @@ powershell -ExecutionPolicy Bypass -Command "Get-Help .\Install-PartyVisuals.ps1
 
 For either visualizer, install Chrome and copy
 [`tools/browser-visuals`](https://github.com/tyclab/lightshow/tree/main/tools/browser-visuals)
-from the matching TycStation Lightshow release to
-`%LOCALAPPDATA%\PartyVisuals\browser-visuals`, then run `npm.cmd ci --omit=dev`
-in that folder. Copy `Start-PartyVisualsBrowser.ps1` into the local startup folder.
+from a TycStation Lightshow commit to `%LOCALAPPDATA%\PartyVisuals\browser-visuals`, then
+run `npm.cmd ci --omit=dev --ignore-scripts` in that folder. Lightshow has no releases;
+the live-audio page needs the helper from lightshow commit `91d0b405` or later (an older
+helper refuses any page that is not a Music Assistant player). An existing show PC is
+updated in the order in [Updating a show PC](#updating-a-show-pc). Copy `Start-PartyVisualsBrowser.ps1` into the local startup folder.
 The launcher has no default page: pass one as `-VisualizerUrl`, Music Assistant's
 player page (for example
 `http://<music-assistant-host>:8095/#/now-playing?player=<player-id>&frameless=1`; sign
@@ -204,14 +206,15 @@ The launcher sets no screen or window size. Chrome reopens the app window on the
 screen where it was last closed, so put it where it belongs once: leave fullscreen
 with F11, drag it to that screen and press F11 again, or move it fullscreen with
 Win+Shift+Left/Right. Chrome uses a dedicated persistent profile and an ephemeral
-loopback debugging port; the helper accesses only the configured Music Assistant
-player page.
+loopback debugging port; the helper accesses only the configured page, Music
+Assistant's player page or the live-audio page.
 
-The helper hides the album artwork, timeline and tint while retaining Music
-Assistant's native visualizer. Existing Companion **VISUALS OFF/ON** buttons use
-NodeCG's `wash.on` switch to cover or reveal it; `all/air.off` and `all/air.on`
-already control that switch. The helper keeps the visualizer covered while NodeCG
-is unreachable. Wash/bar intensity remains specific to those optional graphics.
+On Music Assistant's page the helper hides the album artwork, timeline and tint while
+retaining its native visualizer; the live-audio page shows nothing else to hide.
+Existing Companion **VISUALS OFF/ON** buttons use NodeCG's `wash.on` switch to cover
+or reveal either page; `all/air.off` and `all/air.on` already control that switch.
+The helper keeps the visualizer covered while NodeCG is unreachable. Wash/bar
+intensity remains specific to those optional graphics.
 
 The browser workflow runs without an engine output connection by default.
 Optional `-Curtain` uses the separately deployed guarded pixel-input feature;
@@ -233,13 +236,13 @@ profile. After updating these launch flags, close that browser window once befor
 restarting the task; the launcher refuses to adopt a window with the old flags.
 The profile, login and saved window placement stay in place.
 
-With the matching TycStation Lightshow helper this targets 44 fps.
-Optional `-Fps 60` requests up to 60 captures per second from a
-matching helper/server release. Actual refresh depends on capture and delivery
+With the TycStation Lightshow helper this targets 44 fps.
+Optional `-Fps 60` requests up to 60 captures per second from a helper and
+engine that support it. Actual refresh depends on capture and delivery
 time, and lighting output currently runs at 44 Hz. Frames stay current instead
 of accumulating in a delivery queue; flash limits remain separate from refresh.
 
-Output mode requires the matching helper with `--telemetry-file` support. It writes
+Output mode requires a helper with `--telemetry-file` support. It writes
 one summary per output every 30 seconds to
 `%LOCALAPPDATA%\PartyVisuals\logs\browser-visuals.ndjson`, retaining at most two
 1 MiB files. Summaries report acknowledged input rate, capture/ACK latency and
@@ -267,9 +270,32 @@ edit a copy of its `config.json` and stage it with `-ConfigPath` ([controller
 installation](controller/README.md#installation)); for the legacy task, register it
 again with the other `-VisualizerUrl`. The browser profile is the same either way,
 and the launcher adopts no window opened for the other page, so close the visuals
-first. The capture helper must be the matching TycStation Lightshow release, which
-knows both pages, and the engine the matching release too, which has the `samples`
+first. The capture helper and the engine must be from TycStation Lightshow commit
+`91d0b405` or later: that helper knows both pages and that engine has the `samples`
 topic. The live-audio page needs NodeCG's login off, as the installer leaves it.
+
+### Updating a show PC
+
+To bring the live-audio page to a show PC that runs an older setup, in this order:
+
+1. **The engine** (TycStation Lightshow), at commit `91d0b405` or later, through its
+   own deployment. An older engine has no `samples` topic: the page would only say
+   "No audio from the lightshow".
+2. **The capture helper**, `tools/browser-visuals` from the same or a later lightshow
+   commit, copied to `%LOCALAPPDATA%\PartyVisuals\browser-visuals`, then
+   `npm.cmd ci --omit=dev --ignore-scripts` there. An older helper refuses the
+   live-audio page's address and exits.
+3. **The bundle**: `Install-PartyVisuals.ps1` (its default bundle is `da1c162`, the first
+   with the page; `-BundleRef` takes a later commit or release tag), then stop and start
+   NodeCG.
+4. **The configuration**: `visualizerUrl` in a copy of the controller's `config.json`,
+   checked with `party-visuals.exe check` and staged with `-ConfigPath`
+   ([controller installation](controller/README.md#installation)), or the legacy
+   task registered again with the other `-VisualizerUrl`. `-LiveAudio` on
+   `Install-PartyVisualsRelease.ps1` needs release v0.1.3 or later.
+
+Each step works with the setup before it already updated; in another order the
+browser opens a page its helper refuses, or a page with no samples to draw.
 
 ### The live-audio visualizer
 
@@ -324,10 +350,13 @@ left what it waits for, also as its `data-party-wait` attribute:
 | Status | `data-party-wait` | When |
 |---|---|---|
 | This browser cannot draw the visualizer (no WebGL 2) | `webgl` | No WebGL 2; the page loads again every 30 s |
+| The renderer did not load; reloading in 30 s | `renderer` | Butterchurn's script is missing or will not start (a bundle installed without its `node_modules`); no canvas, so the helper says unavailable |
+| No preset of the pack loaded; reloading in 30 s | `presets` | The preset pack's script is missing, or none of its presets compiles |
 | The graphics context was lost; reloading | `context` | The browser took the page's WebGL context away: the picture is hidden at once, not faded, and the page loads again within 3 s |
 | No connection to NodeCG | `nodecg` | The page's requests fail or have no answer within two seconds |
 | Too many live-audio pages are open | `busy` | The extension refuses a ninth waiting page (HTTP 503) |
 | The samples endpoint refused this page | `endpoint` | Any other error answer from `api/samples` |
+| The samples endpoint sent data this page cannot read | `data` | An answer that is not JSON samples: not base64, half a sample, or samples without a stream, place, rate or age |
 | No connection to the lightshow | `lightshow` | The extension has no socket to the engine (polling carries no samples) |
 | The lightshow has no live input | `live-input` | The engine has no live input, or it is not listening |
 | No audio from the lightshow | `audio` | No sample for a second |
@@ -341,8 +370,9 @@ by itself.
 **Presets.** Every preset of the base pack (about a hundred) comes once a round, in an
 order shuffled each round that does not start with the one just shown. The next
 preset follows after `graphics.presetSeconds` (default 30) of the picture showing,
-blended over 2.7 s; time while the page is calm does not count, and a preset the
-renderer cannot compile is skipped.
+blended over 2.7 s; time while the page is calm does not count. A preset the renderer
+cannot compile is left out from then on and counted in the page's
+`data-party-preset-failures` attribute; with none left the page waits with `presets`.
 
 **Safety.** The page's picture reaches the lights only through the capture helper's
 leases, exactly as Music Assistant's does: the engine's arming, photosensitivity
@@ -606,6 +636,11 @@ npm install
 npx playwright-core install chromium
 npm test
 ```
+
+The page test checks requirement 1 by the samples handed to the renderer and the renderer's own
+band energy computed from them (what presets read), high with a tone and zero with silence; it
+does not compare pixels, since presets also move by time and how the picture looks is judged on
+the screen.
 
 The tests run against a local mock of the engine's Socket.IO server and its samples relay
 (`test/helpers/mock-relay.js`, which names the engine commit it follows); nothing leaves
