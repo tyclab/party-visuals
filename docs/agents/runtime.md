@@ -25,6 +25,14 @@ Read for this topic; paths below are relative to the repository root unless stat
   reconnect backoff and clock continuity; tests use a local mock engine.
 - Installer changes must pass the Windows PowerShell 5.1 path:
   `powershell -NoProfile -ExecutionPolicy Bypass -File test\install.test.ps1`.
+- A controller that is not running: read the end of `controller.log` first. It
+  holds `controller stopped: <error>` or the Go runtime's crash report
+  ([Keeping the controller running](../../controller/README.md#keeping-the-controller-running)).
+- `test/controller-install.test.ps1` loads the ScheduledTasks module first and
+  replaces each of its commands that changes a task with one that throws, so a
+  run on a show PC cannot reach the installed task. Run with `-File`, a script's
+  functions are global, and a module that loads later replaces them: keep that
+  order when adding a stub.
 - The native controller uses `controller/` and the run-once session worker;
   never wrap the legacy restart loops with a second supervisor. Run its Go
   checks, `test/controller-install.test.ps1` and `test/release-install.test.ps1`. Native dummy-process tests

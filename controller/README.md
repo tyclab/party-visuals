@@ -3,8 +3,11 @@
 The controller owns one NodeCG/browser/capture session. CLI, interactive menu,
 tray and login task address that owner. Manual Off survives sleep, unlock,
 sign-in and retries. Closing the menu leaves visuals running; Stop records Off
-before shutdown. A closed browser or an unclean previous owner leaves visuals
-Off until Start, avoiding a guess about whether an exit was deliberate.
+before shutdown. A closed browser leaves visuals Off until Start, and so does
+a controller that starts in Manual mode with a Start left over, avoiding a guess
+about whether an exit was deliberate. In Follow Party the Start stays across a
+restart of the controller or of Windows: the party state decides whether
+visuals run, so there is nothing to guess.
 
 The executable reuses tycswap's public native tray adapter at the pinned Go
 revision. It does not run tycswap, use its accounts or require WSL. Automatic
@@ -105,6 +108,30 @@ calm and names what it waits for on screen and in the helper's status file
 (`display.wait`, beside `display.ageMs`). The helper's `--status-file` support is
 required before a session can run.
 
+## Keeping the controller running
+
+The **PartyVisuals Controller** task starts the controller at sign-in and asks
+again every minute. While the controller runs, Task Scheduler drops that start
+(the task ignores new instances); after any exit the controller is back within
+a minute. Task Scheduler's restart-on-failure covers a start that failed, not
+an exit, whatever its code. A controller that ran visuals in Follow Party
+resumes them once it has read the party state; in Manual mode it comes back
+Off.
+
+**Stop visuals and quit** therefore ends the controller for at most a minute:
+visuals stay Off, as Stop recorded, and the tray icon returns. To keep the
+controller closed, disable the task first
+(`Disable-ScheduledTask -TaskName 'PartyVisuals Controller'`), then quit.
+
+`controller.log` says why a controller ended. One that gives up on an error,
+such as a tray icon Windows does not take, writes
+`controller stopped: <error>` and exits with code 1. A crash of the Go runtime
+exits with code 2 and leaves its report (`panic: …` or `Exception 0x…`, then
+the goroutine stacks) in the same file: the task gives the controller's
+standard error no reader, so `app` points it at the log. A `controller
+<version> started` line with neither before it follows a quit, a sign-out or a
+process that was ended.
+
 ## Sign-in restore
 
 Windows can reopen the apps that were open at shutdown or restart when the user
@@ -195,8 +222,11 @@ hash reviewed elsewhere, such as the release job log. After the first Start
 with a Music Assistant player, sign in to Music Assistant once in the dedicated
 browser window.
 
-To update, choose **Stop visuals and quit** in the tray, then run the line again
-with the new tag and `-Cutover`. The active configuration is kept. To change it,
+To update, run the line again with the new tag and `-Cutover`. Cutover asks the
+running controller to quit, waits until it has let go of its folder, registers
+the new one and starts it. Visuals begin Off, also where Follow Party had a
+Start, so Start them again afterwards. A cutover that fails before the new task
+is registered enables the old task again. The active configuration is kept. To change it,
 for example to add the Home Assistant keys, edit a copy of
 `%LOCALAPPDATA%\PartyVisuals\controller\config.json` and add
 `-ConfigPath <copy>` to that line.
@@ -221,7 +251,8 @@ go tool goversioninfo -64 -o cmd/party-visuals/resource_windows_amd64.syso -mani
 
 The executable stays a console program, not a `-H windowsgui` one, because the
 same file is the CLI and `status`, `start`, `stop`, `quit` and the others print
-to the console. Only `app` detaches: it writes its output to `controller.log`
+to the console. Only `app` detaches: it writes its output to `controller.log`,
+makes that file its standard error handle, where the Go runtime prints a crash,
 and, when it is the only process on its console, as under the login task,
 frees that console (FreeConsole).
 
