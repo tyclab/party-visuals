@@ -182,6 +182,53 @@ func TestLeftoverOnAfterOwnerLossRequiresStart(t *testing.T) {
 		t.Fatal("ambiguous previous owner silently resumed")
 	}
 }
+func TestFollowPartyStartSurvivesANewOwner(t *testing.T) {
+	store := FileStore{Path: filepath.Join(t.TempDir(), "intent.json")}
+	if e := store.Save(Intent{Version: 1, Mode: "follow-party", Requested: true}); e != nil {
+		t.Fatal(e)
+	}
+	b := &fakeBackend{}
+	m, e := New(store, b, nil)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer m.Close()
+	m.Apply("restore")
+	eventually(t, func() bool { return m.Snapshot().Phase == "waiting-for-party" })
+	if v, e := store.Load(); e != nil || !v.Requested || v.ManualOff {
+		t.Fatalf("a new owner dropped the Start that Follow Party had: %+v, %v", v, e)
+	}
+	b.mu.Lock()
+	started := len(b.sessions)
+	b.mu.Unlock()
+	if started != 0 {
+		t.Fatal("visuals started before the party")
+	}
+	m.Apply("party-on")
+	eventually(t, func() bool { return m.Snapshot().Phase == "running" })
+}
+func TestCloseEndsTheSessionAndKeepsTheIntent(t *testing.T) {
+	b := &fakeBackend{}
+	m, store := newManager(t, b)
+	m.Apply("follow-party")
+	m.Apply("start")
+	m.Apply("party-on")
+	eventually(t, func() bool { return m.Snapshot().Phase == "running" })
+	if e := m.Close(); e != nil {
+		t.Fatal(e)
+	}
+	b.mu.Lock()
+	s := b.sessions[0]
+	b.mu.Unlock()
+	select {
+	case <-s.stopped:
+	default:
+		t.Fatal("Close left the worker running")
+	}
+	if v, e := store.Load(); e != nil || !v.Requested || v.ManualOff {
+		t.Fatalf("Close recorded an Off nobody asked for: %+v, %v", v, e)
+	}
+}
 func TestPartyEventsDoNotRestartManualSession(t *testing.T) {
 	b := &fakeBackend{}
 	m, _ := newManager(t, b)

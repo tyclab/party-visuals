@@ -74,7 +74,7 @@ func New(store Store, backend Backend, changed func(Status)) (*Manager, error) {
 	if intent.Version != 1 || (intent.Mode != "manual" && intent.Mode != "follow-party") {
 		return nil, errors.New("unsupported controller intent; preserve the file and repair it before starting")
 	}
-	if intent.Requested {
+	if intent.Requested && intent.Mode != "follow-party" {
 		intent.Requested, intent.ManualOff = false, true
 		if err := store.Save(intent); err != nil {
 			return nil, err
@@ -309,8 +309,9 @@ func (m *Manager) reconcile(ctx context.Context, gen uint64, want bool) {
 	}()
 }
 
+// Close ends the session and leaves the intent as it is: only Stop records
+// Off, so an owner that ends on its own does not turn Follow Party off.
 func (m *Manager) Close() error {
-	persistErr := m.Apply("stop")
 	m.mu.Lock()
 	m.closed = true
 	if m.cancel != nil {
@@ -323,5 +324,5 @@ func (m *Manager) Close() error {
 	m.session = nil
 	m.run.Unlock()
 	m.wg.Wait()
-	return errors.Join(persistErr, err)
+	return err
 }
