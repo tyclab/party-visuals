@@ -395,3 +395,27 @@ func TestAControllerThatEndsOnAnErrorSaysWhyInControllerLog(t *testing.T) {
 		t.Fatalf("a controller asked to quit logged a stop reason: %q", b)
 	}
 }
+
+func TestAControllerThatCannotStartSaysWhyInControllerLog(t *testing.T) {
+	saved := detach
+	defer func() { detach = saved }()
+	detach = func(*os.File) error { return nil }
+	root := t.TempDir()
+	ran := false
+	if e := owned(root, func(string, worker.Config, *controllerLog) error { ran = true; return nil }); e == nil || ran {
+		t.Fatalf("a folder without a configuration started a controller: %v", e)
+	}
+	b, _ := os.ReadFile(filepath.Join(root, "controller.log"))
+	if !strings.Contains(string(b), "controller did not start: ") || strings.Contains(string(b), "started") {
+		t.Fatalf("controller.log holds %q", b)
+	}
+	detach = func(*os.File) error { return errors.New("no standard error handle") }
+	root = writeRoot(t, nil)
+	if e := owned(root, func(string, worker.Config, *controllerLog) error { ran = true; return nil }); e != nil || !ran {
+		t.Fatalf("a controller without a place for its crash report did not run: %v", e)
+	}
+	b, _ = os.ReadFile(filepath.Join(root, "controller.log"))
+	if !strings.Contains(string(b), "no standard error handle") || !strings.Contains(string(b), "controller dev started\n") {
+		t.Fatalf("controller.log holds %q", b)
+	}
+}

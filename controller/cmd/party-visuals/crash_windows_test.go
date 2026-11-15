@@ -35,7 +35,7 @@ func TestACrashReportLandsInControllerLog(t *testing.T) {
 		t.Fatalf("the crashing controller ended with %v, not the runtime's exit code 2", e)
 	}
 	b, _ := os.ReadFile(path)
-	if !strings.Contains(string(b), "panic: party test crash") || !strings.Contains(string(b), "goroutine ") {
-		t.Fatalf("controller.log holds %q", b)
+	if !strings.Contains(string(b), "panic: party test crash") || strings.Count(string(b), "\ngoroutine ") < 2 {
+		t.Fatalf("controller.log holds no report with every goroutine: %q", b)
 	}
 }
