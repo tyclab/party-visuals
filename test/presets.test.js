@@ -4,6 +4,16 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const { PresetCycle, PRESET_SECONDS } = require('../shared/presets.js');
 
+/** mulberry32: a seeded random number generator, so each simulated run is the same every time. */
+function seeded(seed) {
+  return () => {
+    seed = (seed + 0x6d2b79f5) | 0;
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
 test('presets change after their time with the picture showing, each once a round, never twice in a row', () => {
   const names = ['a', 'b', 'c', 'd'];
   let seed = 3;
@@ -32,4 +42,22 @@ test('a preset that does not compile is counted, left out from then on, and with
   const none = new PresetCycle(['x', 'y']);
   assert.equal(none.load(() => { throw new Error('no'); }), null);
   assert.equal(none.failed.length, 2);
+});
+
+test('a preset that does not compile as the last of its round does not let the next round start with the preset on screen', () => {
+  // 2000 seeded runs of four presets, one of them broken: a first preset and six changes each.
+  let repeats = 0, lastOfRound = 0;
+  for (let seed = 1; seed <= 2000; seed++) {
+    const names = ['a', 'b', 'c', 'd'], broken = names[seed % names.length];
+    const cycle = new PresetCycle(names, { random: seeded(seed) });
+    const load = (name) => {
+      if (name !== broken) return;
+      if (!cycle.round.length) lastOfRound++;
+      throw new SyntaxError(name);
+    };
+    const shown = Array.from({ length: 7 }, () => cycle.load(load));
+    repeats += shown.filter((name, i) => i > 0 && name === shown[i - 1]).length;
+  }
+  assert.ok(lastOfRound > 0, 'in some runs the broken preset comes last in its round');
+  assert.equal(repeats, 0, `${repeats} back-to-back repeats in 12000 changes`);
 });
