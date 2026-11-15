@@ -7,6 +7,10 @@ and stages the Windows controller with Install-PartyVisualsController.ps1.
 
 .EXAMPLE
 powershell -NoProfile -ExecutionPolicy Bypass -File .\Install-PartyVisualsRelease.ps1 -Tag v0.1.0 -MusicAssistantUrl http://music.example:8095 -Player 02:00:00:00:00:01
+
+.EXAMPLE
+powershell -NoProfile -ExecutionPolicy Bypass -File .\Install-PartyVisualsRelease.ps1 -Tag v0.1.0 -LiveAudio
+Shows this bundle's live-audio visualizer, drawn from the lightshow's live input, instead of a Music Assistant player.
 #>
 [CmdletBinding()]
 param(
@@ -15,6 +19,7 @@ param(
     [ValidatePattern('^[a-fA-F0-9]{64}$|^$')][string] $ExpectedSha256 = '',
     [string] $MusicAssistantUrl,
     [string] $Player,
+    [switch] $LiveAudio,
     [string] $ChromeExe,
     [string] $NodeExe,
     [string] $NodecgConfig,
@@ -27,7 +32,8 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $ReleaseBase = 'https://github.com/tyclab/party-visuals/releases/download'
 $Assets = @('party-visuals.exe','Install-PartyVisualsController.ps1','Run-PartyVisualsSession.ps1','Start-PartyVisualsBrowser.ps1','Start-PartyVisualsNodecg.ps1')
-$Usage = 'Usage: Install-PartyVisualsRelease.ps1 -Tag vX.Y.Z [-MusicAssistantUrl http://host:8095 -Player <id> | -ConfigPath <file> | -ImportLegacy] [-ExpectedSha256 <sha256>] [-Cutover]'
+$Usage = 'Usage: Install-PartyVisualsRelease.ps1 -Tag vX.Y.Z [-MusicAssistantUrl http://host:8095 -Player <id> | -LiveAudio | -ConfigPath <file> | -ImportLegacy] [-ExpectedSha256 <sha256>] [-Cutover]'
+$LiveAudioUrl = 'http://127.0.0.1:9090/bundles/party-visuals/graphics/milkdrop.html'
 $WindowsPowerShell = "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe"
 
 function Save-ReleaseAsset([string] $Name, [string] $Path) {
@@ -92,15 +98,18 @@ function Find-Node {
     if ($null -ne $command) { return $command.Path }
     return "$env:ProgramFiles\nodejs\node.exe"
 }
-function New-ControllerConfig([string] $MusicAssistantUrl, [string] $Player, [string] $ChromeExe, [string] $NodeExe, [string] $NodecgConfig) {
-    $base = Get-MusicAssistantBase $MusicAssistantUrl
-    if (-not $Player.Trim() -or $Player -match '[\x00-\x1f]') { throw 'A Music Assistant player id is required.' }
+function New-ControllerConfig([string] $MusicAssistantUrl, [string] $Player, [string] $ChromeExe, [string] $NodeExe, [string] $NodecgConfig, [switch] $LiveAudio) {
+    if ($LiveAudio) { $visualizer = $LiveAudioUrl } else {
+        $base = Get-MusicAssistantBase $MusicAssistantUrl
+        if (-not $Player.Trim() -or $Player -match '[\x00-\x1f]') { throw 'A Music Assistant player id is required.' }
+        $visualizer = $base + '/#/now-playing?player=' + [Uri]::EscapeDataString($Player.Trim()) + '&frameless=1'
+    }
     $logs = Join-Path $Root 'logs'
     [ordered]@{
         version = 1; workerScript = ''; nodeExe = $NodeExe; chromeExe = $ChromeExe
         nodecgRoot = (Join-Path $Root 'EclipseGraphics'); browserProfile = (Join-Path $Root 'browser-profile')
         helperPath = (Join-Path $Root 'browser-visuals\cli.js')
-        visualizerUrl = $base + '/#/now-playing?player=' + [Uri]::EscapeDataString($Player.Trim()) + '&frameless=1'
+        visualizerUrl = $visualizer
         controlsUrl = 'http://127.0.0.1:9090/bundles/party-visuals/api/state'; nodecgConfig = $NodecgConfig
         telemetryFile = (Join-Path $logs 'browser-visuals.ndjson'); statusFile = (Join-Path $logs 'controller-helper.json')
         logFile = (Join-Path $logs 'nodecg.log'); curtain = $false; room = $false; panels = ''; fixture = 53; fps = 0
@@ -112,6 +121,8 @@ function Assert-Prerequisites($Config) {
     if (-not (Test-Path -LiteralPath $Config.chromeExe -PathType Leaf)) { $missing += "Chrome ($($Config.chromeExe)): winget install --id Google.Chrome --exact" }
     if (-not (Test-Path -LiteralPath (Join-Path $Config.nodecgRoot 'start.js') -PathType Leaf)) { $missing += "NodeCG with this bundle ($($Config.nodecgRoot)): Install-PartyVisuals.ps1 -LightshowUrl http://<engine host>:3000, without -Autostart" }
     if (-not (Test-Path -LiteralPath $Config.helperPath -PathType Leaf)) { $missing += "Capture helper ($($Config.helperPath)): tools/browser-visuals of the matching Lightshow release, then npm.cmd ci --omit=dev" }
+    $page = Join-Path $Config.nodecgRoot 'bundles\party-visuals\graphics\milkdrop.html'
+    if ($Config.visualizerUrl -eq $LiveAudioUrl -and -not (Test-Path -LiteralPath $page -PathType Leaf)) { $missing += "The live-audio page ($page): update this bundle with Install-PartyVisuals.ps1" }
     if ($missing.Count) { throw ("Install these first (controller/README.md, Installation), then run this again:`n  " + ($missing -join "`n  ")) }
 }
 function Invoke-ControllerInstaller([string] $Installer, [string[]] $Arguments) {
@@ -120,6 +131,7 @@ function Invoke-ControllerInstaller([string] $Installer, [string[]] $Arguments) 
 }
 function Invoke-ReleaseInstall {
     if ($ConfigPath -and $ImportLegacy) { throw 'Use either -ConfigPath or -ImportLegacy.' }
+    if ($LiveAudio -and ($MusicAssistantUrl -or $Player -or $ConfigPath -or $ImportLegacy)) { throw 'Use -LiveAudio without a Music Assistant player, -ConfigPath or -ImportLegacy.' }
     $Root = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Root)
     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
     $directory = Join-Path $Root ('installer\' + $Tag)
@@ -131,13 +143,13 @@ function Invoke-ReleaseInstall {
         $stage += @('-ConfigPath', (Resolve-Path -LiteralPath $ConfigPath).ProviderPath)
     } elseif ($ImportLegacy) {
         $stage += '-ImportLegacy'
-    } elseif ($MusicAssistantUrl -or $Player -or -not (Test-Path -LiteralPath (Join-Path $Root 'controller\config.json'))) {
-        $url = if ($MusicAssistantUrl) { $MusicAssistantUrl } else { Read-Host 'Music Assistant address, http://host:8095' }
-        $id = if ($Player) { $Player } else { Read-Host 'Music Assistant player id (the player= value of its now-playing page)' }
+    } elseif ($LiveAudio -or $MusicAssistantUrl -or $Player -or -not (Test-Path -LiteralPath (Join-Path $Root 'controller\config.json'))) {
+        $url = if ($LiveAudio -or $MusicAssistantUrl) { $MusicAssistantUrl } else { Read-Host 'Music Assistant address, http://host:8095' }
+        $id = if ($LiveAudio -or $Player) { $Player } else { Read-Host 'Music Assistant player id (the player= value of its now-playing page)' }
         $chrome = if ($ChromeExe) { $ChromeExe } else { Find-Chrome }
         $node = if ($NodeExe) { $NodeExe } else { Find-Node }
         $nodecg = if ($NodecgConfig) { $NodecgConfig } else { Join-Path $Root 'EclipseGraphics\cfg\party-visuals.json' }
-        $config = New-ControllerConfig $url $id $chrome $node $nodecg
+        $config = New-ControllerConfig $url $id $chrome $node $nodecg -LiveAudio:$LiveAudio
         Assert-Prerequisites $config
         $candidate = Join-Path $directory 'controller-config.json'
         [IO.File]::WriteAllText($candidate, ($config | ConvertTo-Json), (New-Object Text.UTF8Encoding($false)))

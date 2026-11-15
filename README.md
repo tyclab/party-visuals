@@ -13,11 +13,13 @@ Lightshow engine ([lightshow](https://github.com/tyclab/lightshow)). A
 cards, lower thirds and tickers, this bundle draws what moves with the music behind and
 around them.
 
-The show PC displays Music Assistant's native MilkDrop visualizer in fullscreen
-Chrome. The browser launcher opens it in a dedicated persistent profile on
-whichever screen it was last left and follows the existing Companion visual on/off controls. OBS is not
-part of this workflow. The wash and bar below remain available as optional local
-graphics.
+The show PC displays a MilkDrop visualizer in fullscreen Chrome: Music Assistant's
+native one on its now-playing page, or this bundle's **live-audio visualizer**, drawn
+from the engine's live input. The one setting `visualizerUrl` (the launcher's
+`-VisualizerUrl`) chooses ([Choosing the visualizer](#choosing-the-visualizer)). The
+browser launcher opens it in a dedicated persistent profile on whichever screen it was
+last left and follows the existing Companion visual on/off controls. OBS is not part
+of this workflow. The wash and bar below remain available as optional local graphics.
 
 - **Colour wash** (`graphics/wash.html`): the whole frame in the engine's palette, to
   sit under EclipseGraphics' cards. The colours turn and flow with the beat; each beat
@@ -25,9 +27,12 @@ graphics.
 - **Beat bar** (`graphics/bar.html`): a band of the palette's colours across the bottom of
   the frame (`?position=top` for the top), scrolling half a block a beat and swelling on
   each beat.
+- **Live-audio visualizer** (`graphics/milkdrop.html`): a fullscreen MilkDrop picture
+  rendered from the engine's live input, so it moves with whatever the engine hears,
+  whoever plays it ([below](#the-live-audio-visualizer)).
 
-Both are 1920 × 1080 with a transparent background, take the engine's palette (its
-palette override when it has one, else the look's colours), and:
+The wash and the bar are 1920 × 1080 with a transparent background, take the engine's
+palette (its palette override when it has one, else the look's colours), and:
 
 - **never pulse faster than 5 Hz**, the photosensitivity limit the engine holds its own
   strobe to: up to 300 bpm a pulse a beat,
@@ -140,14 +145,17 @@ nothing while the policy blocks scripts):
 powershell -ExecutionPolicy Bypass -Command "Get-Help .\Install-PartyVisuals.ps1 -Detailed"
 ```
 
-For the native Music Assistant visualizer, install Chrome and copy
+For either visualizer, install Chrome and copy
 [`tools/browser-visuals`](https://github.com/tyclab/lightshow/tree/main/tools/browser-visuals)
 from the matching TycStation Lightshow release to
 `%LOCALAPPDATA%\PartyVisuals\browser-visuals`, then run `npm.cmd ci --omit=dev`
 in that folder. Copy `Start-PartyVisualsBrowser.ps1` into the local startup folder.
-The launcher has no default player page: pass yours as `-VisualizerUrl`, for example
-`http://<music-assistant-host>:8095/#/now-playing?player=<player-id>&frameless=1`.
-Sign in to Music Assistant once in the dedicated browser profile.
+The launcher has no default page: pass one as `-VisualizerUrl`, Music Assistant's
+player page (for example
+`http://<music-assistant-host>:8095/#/now-playing?player=<player-id>&frameless=1`; sign
+in to Music Assistant once in the dedicated browser profile) or the live-audio
+visualizer, `http://127.0.0.1:9090/bundles/party-visuals/graphics/milkdrop.html`
+([Choosing the visualizer](#choosing-the-visualizer)).
 
 For playback-path limits and black-screen diagnosis, see
 [runtime troubleshooting](docs/agents/runtime.md).
@@ -239,8 +247,108 @@ failure counts; they contain no credentials, player URLs or fixture identities.
 The fleet's Windows Alloy installer collects the active file. Display-only mode
 does not collect pixel telemetry, and log failures never stop capture.
 
-The browser's own Music Assistant audio path determines visualizer timing;
+Music Assistant's visualizer takes its timing from the browser's own Music Assistant
+audio path; the live-audio visualizer's is [bounded below](#the-live-audio-visualizer).
 `graphics.offsetMs` applies only to this bundle's wash/bar graphics.
+
+### Choosing the visualizer
+
+`visualizerUrl` in the controller's `config.json` (or the legacy launcher's
+`-VisualizerUrl`) is the one setting, and nothing else changes with it:
+
+| Page | `visualizerUrl` | Moves with |
+|---|---|---|
+| Music Assistant's visualizer | `http://<music-assistant-host>:8095/#/now-playing?player=<player-id>&frameless=1` | Audio Music Assistant hands that browser through its player queue |
+| Live-audio visualizer | `http://127.0.0.1:9090/bundles/party-visuals/graphics/milkdrop.html` | Anything the engine's live input hears |
+
+A new controller install takes the live-audio page with `Install-PartyVisualsRelease.ps1
+-LiveAudio` instead of `-MusicAssistantUrl` and `-Player`. To switch an installed one,
+edit a copy of its `config.json` and stage it with `-ConfigPath` ([controller
+installation](controller/README.md#installation)); for the legacy task, register it
+again with the other `-VisualizerUrl`. The browser profile is the same either way,
+and the launcher adopts no window opened for the other page, so close the visuals
+first. The capture helper must be the matching TycStation Lightshow release, which
+knows both pages, and the engine the matching release too, which has the `samples`
+topic. The live-audio page needs NodeCG's login off, as the installer leaves it.
+
+### The live-audio visualizer
+
+The page renders with [Butterchurn](https://github.com/jberg/butterchurn) 2.6.7, the WebGL
+implementation of MilkDrop, and its base preset pack, `butterchurn-presets` 2.4.7. Both are
+this bundle's npm dependencies: the installer's `npm ci` puts them in
+`bundles\party-visuals\node_modules`, and NodeCG serves them to the page from there
+(its `/bundles/<bundle>/node_modules/` route, checked in NodeCG 2.8.0's source; the
+browser test serves the same paths itself, not through NodeCG). Nothing is fetched from
+the internet when the page loads: the browser test blocks every request outside the
+page's own origin and the page works without one. It needs WebGL 2; without
+it the page says so and the helper reports the visualizer unavailable.
+
+**Its sound.** The extension subscribes to the engine's read-only `samples` topic, with
+the token it already holds, only while a live-audio page asks for samples (the
+subscription ends five seconds after the last page stops asking), and acknowledges each
+packet as it arrives. The page asks `GET api/samples` on its own origin, one request at
+a time; the extension answers as soon as it has samples the page lacks, at most the
+newest 1024, or after half a second with none. A request without an answer after two
+seconds counts as no connection to NodeCG. The token never reaches the page. Each
+frame the page hands the renderer the newest 512 samples, doubled to the 44.1 kHz its
+band levels assume, as 1024 time-domain bytes, mono to both channels. The page has no
+audio output and no audio context: nothing can reach the speakers from it.
+
+**Timing.** The renderer draws silence rather than a window whose newest sample is more
+than 100 ms past the quickest delivery of the last five seconds; `test/samples.test.js`
+holds that to 105 ms, the extra 5 ms for a sound card 0.1 % off over those five
+seconds. That is a bound on top of the quickest path, the baseline, which is not
+measured here: the capture block, the network and the next frame are in it. Each part
+of the path holds little: the engine's live input sends sample lines only while the
+engine has read to within 1024 samples (46 ms) of them; the engine sends the extension
+its next packet when the last is acknowledged, or after a second without that, so a
+stalled link can hold one packet a second; the extension answers each pull with at most
+the newest 1024 samples; and the page has one request out. A slow page or a hiccup
+drops samples and never queues them. Lateness is measured on monotonic clocks against
+the stream's own sample count, so neither machine's wall clock enters it. A lasting
+change of the path, such as samples the sound card lost, becomes the new quickest path
+within five seconds. Why 100 ms: room for jitter of the path while the picture stays
+inside a sixteenth note at 128 bpm (117 ms); how much jitter the real path has is not
+measured here.
+
+**Measuring the baseline.** The engine stamps each block with its wall clock when it
+was read from the device, and the page compares the stamp of the newest sample it draws
+with the show PC's clock: the median and worst of the last five seconds are its
+`data-party-age` attribute (`median,worst` in ms), which the capture helper writes to
+its status file as `display.ageMs` beside `display.wait`. It is a diagnostic only, as
+good as the two machines' clock sync, and decides nothing about what is drawn.
+
+**When it is calm.** The page fades its picture out over a second and says at its lower
+left what it waits for, also as its `data-party-wait` attribute:
+
+| Status | `data-party-wait` | When |
+|---|---|---|
+| This browser cannot draw the visualizer (no WebGL 2) | `webgl` | No WebGL 2; the page loads again every 30 s |
+| The graphics context was lost; reloading | `context` | The browser took the page's WebGL context away: the picture is hidden at once, not faded, and the page loads again within 3 s |
+| No connection to NodeCG | `nodecg` | The page's requests fail or have no answer within two seconds |
+| Too many live-audio pages are open | `busy` | The extension refuses a ninth waiting page (HTTP 503) |
+| The samples endpoint refused this page | `endpoint` | Any other error answer from `api/samples` |
+| No connection to the lightshow | `lightshow` | The extension has no socket to the engine (polling carries no samples) |
+| The lightshow has no live input | `live-input` | The engine has no live input, or it is not listening |
+| No audio from the lightshow | `audio` | No sample for a second |
+| Silence | `silence` | Three seconds under −80 dBFS, the engine's own quiet level |
+
+The capture helper treats the faded picture as it treats Music Assistant's faded
+visualizer: it releases the curtain, panel and room leases and reports the wait. The
+first loud samples bring the picture back over a second, and the helper claims again
+by itself.
+
+**Presets.** Every preset of the base pack (about a hundred) comes once a round, in an
+order shuffled each round that does not start with the one just shown. The next
+preset follows after `graphics.presetSeconds` (default 30) of the picture showing,
+blended over 2.7 s; time while the page is calm does not count, and a preset the
+renderer cannot compile is skipped.
+
+**Safety.** The page's picture reaches the lights only through the capture helper's
+leases, exactly as Music Assistant's does: the engine's arming, photosensitivity
+acknowledgement, flash limits and blackout apply to it on the engine's side. The screen
+shows the picture as the preset draws it, as Music Assistant's visualizer does; the
+wash and bar's five-pulse cap is theirs and does not apply to it.
 
 NodeCG listens on 127.0.0.1 only, so the browser helper and Companion run on the show PC too. The show
 PC reaches the engine at its port 3000, which the engine's host has to admit from
@@ -337,6 +445,7 @@ nothing is sent).
 | `lightshow.reconnect.minMs` · `maxMs` | The wait before reconnecting: doubling from 500 ms up to 15 s, a little shorter at random. |
 | `graphics.maxFps` | The most frames a second a graphic draws (default 30). |
 | `graphics.offsetMs` | Shift the graphics' beat, −1000 to 1000 ms: positive draws it earlier, to make up for a projector's or OBS's delay. Judge it on the real screen. |
+| `graphics.presetSeconds` | The live-audio visualizer's next preset after this many seconds of picture, 10 to 600 (default 30). |
 | `allowHosts` | Host names the `api/` addresses answer to besides IP addresses, `localhost` and `*.local` (Companion calling this machine by name). |
 
 ### The network
@@ -358,6 +467,7 @@ Each graphic can be opened directly in a browser at 1920 × 1080:
 |---|---|
 | Colour wash, under EclipseGraphics' overlay | `http://127.0.0.1:9090/bundles/party-visuals/graphics/wash.html` |
 | Beat bar, over it | `http://127.0.0.1:9090/bundles/party-visuals/graphics/bar.html` (`?position=top` for the top) |
+| Live-audio visualizer, fullscreen | `http://127.0.0.1:9090/bundles/party-visuals/graphics/milkdrop.html` |
 
 The state lives in the extension, so a source refreshed or opened mid-show comes back as
 it was. With NodeCG's login on, add the user's `?key=…` (NodeCG's Graphics tab gives the
@@ -413,8 +523,11 @@ flowchart LR
   NodeTask -.->|Output, starts and exit codes| NodeLog[Rotating nodecg.log]
   Logon --> BrowserTask[Browser task]
   Session[Console / Remote Desktop connect, unlock] --> BrowserTask
-  BrowserTask -->|Reopen after exit or session move, until -Stop| Browser[Fullscreen Music Assistant / continuous background capture]
-  Music[Music Assistant PCM] --> Browser
+  BrowserTask -->|Reopen after exit or session move, until -Stop| Browser[Fullscreen visualizer page / continuous background capture]
+  Music[Music Assistant PCM, Music Assistant page] --> Browser
+  Lightshow -->|Read-only samples while a page asks, the next packet on acknowledgement or after 1 s| Samples[Extension sample feed]
+  Samples -->|api/samples, one request out, newest only| LivePage[Live-audio page, Butterchurn]
+  LivePage --> Browser
   BrowserTask --> Helper[Local browser helper]
   Helper -->|Independent curtain and panel leases; shared captures| Lightshow
   Helper -->|Room picture input| Lightshow
@@ -444,7 +557,8 @@ the four colour slots through the colour-preset catalogue and `paletteOverride`.
 The three palette fields belong to the `look` domain; catalogue/library changes alone
 do not refresh the beat. Palette-only and typed-bpm-only patches never reuse an old
 `clock.beatPos` as a new clock reading. The extension sends `sync` and a read-only
-`subscribe: ['audio']` request on each connection; it sends no lighting commands.
+`subscribe: ['audio']` request on each connection, and `subscribe: ['samples']` while a
+live-audio page asks for samples; it sends no lighting commands.
 Audio packets never reset the musical clock. HTTP fallback retains tempo and
 colour support but cannot supply the high-rate audio feed. Older audio producers
 without event IDs supply energy only, so held classifications cannot retrigger.
@@ -489,11 +603,20 @@ Repository contribution rules and comment-limit approvals live in [AGENTS.md](AG
 
 ```
 npm install
+npx playwright-core install chromium
 npm test
 ```
 
-The tests run against a local mock of the engine's Socket.IO server; nothing leaves the
-machine. `shared/` is loaded both by the extension and, as plain scripts, by the graphics.
+The tests run against a local mock of the engine's Socket.IO server and its samples relay
+(`test/helpers/mock-relay.js`, which names the engine commit it follows); nothing leaves
+the machine. `test/page.test.js` drives the live-audio page in headless Chromium. Where
+the headless shell has no WebGL 2 (some Nix builds), run it with
+`PARTY_VISUALS_BROWSER_CHANNEL=chromium` and `PARTY_VISUALS_BROWSER_ARGS` holding the
+flags that give that Chromium WebGL, such as
+`--use-gl=angle --use-angle=vulkan --enable-features=Vulkan --ignore-gpu-blocklist`. On CI the
+test relies on software WebGL 2 in the headless Chromium of the pinned `playwright-core`, so
+a bump of `playwright-core` has to be checked against this test. `shared/` is loaded both by
+the extension and, as plain scripts, by the graphics.
 
 On Windows, `powershell -NoProfile -ExecutionPolicy Bypass -File test\install.test.ps1`
 checks the install script in a folder under `%TEMP%`: the token file, the configuration
@@ -508,4 +631,8 @@ and not registered. It leaves a running NodeCG task alone.
 
 ## Licence
 
-MIT, see [LICENSE](LICENSE). NodeCG and Socket.IO are MIT-licensed.
+MIT, see [LICENSE](LICENSE). NodeCG and Socket.IO are MIT-licensed. Butterchurn and
+`butterchurn-presets` are MIT-licensed packages by Butterchurn's author; the presets in
+the pack are community MilkDrop presets, converted for Butterchurn, by the authors their
+names give, and carry no licence of their own. Both are npm dependencies, installed on
+the show PC by `npm ci`, and not part of this repository.

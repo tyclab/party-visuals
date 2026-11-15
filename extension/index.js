@@ -7,6 +7,7 @@ const path = require('node:path');
 const { LightshowClient } = require('./lightshow-client.js');
 const { runCommand, normaliseControls, DEFAULT_CONTROLS } = require('./commands.js');
 const { createHttpHandler } = require('./http.js');
+const { SampleFeed } = require('./samples.js');
 const { BeatClock, clampBpm } = require('../shared/beat-clock.js');
 
 const BUNDLE = 'party-visuals';
@@ -108,6 +109,11 @@ module.exports = function partyVisuals(nodecg) {
     if (client.status.status === 'connected') publishBeat();
   }, BEAT_REFRESH_MS);
 
+  // The live input as heard, for the live-audio page (graphics/milkdrop.html).
+  const samples = new SampleFeed({ client });
+  client.on('samples', (packet) => samples.receive(packet));
+  const samplesTimer = setInterval(() => samples.tick(), 100);
+
   if (tokenError) {
     set(R.connection, { ...client.status, status: 'error', error: tokenError });
     log.warn(`lightshow not started: ${tokenError}`);
@@ -141,11 +147,13 @@ module.exports = function partyVisuals(nodecg) {
 
   const router = nodecg.Router();
   if (nodecg.util && typeof nodecg.util.authCheck === 'function') router.use(nodecg.util.authCheck);
-  router.use(createHttpHandler({ run: command, state: publicState, allowHosts: config.allowHosts || [] }));
+  router.use(createHttpHandler({ run: command, state: publicState, samples, allowHosts: config.allowHosts || [] }));
   nodecg.mount(`/bundles/${BUNDLE}`, router);
 
   nodecg.on('serverStopping', () => {
     clearInterval(refresh);
+    clearInterval(samplesTimer);
+    samples.stop();
     client.stop();
   });
 

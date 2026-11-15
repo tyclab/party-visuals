@@ -162,3 +162,14 @@ func TestBrowserProfileMustNotBeABrowsersOwnProfileFolder(t *testing.T) {
 		t.Error("the default root was accepted while LOCALAPPDATA names it through a link")
 	}
 }
+
+func TestTheLiveAudioPageIsAVisualizer(t *testing.T) {
+	const live = "http://127.0.0.1:9090/bundles/party-visuals/graphics/milkdrop.html"
+	c, e := Load(writeConfig(t, map[string]any{"visualizerUrl": live}))
+	if e != nil || c.VisualizerURL != live {
+		t.Fatalf("the live-audio page is refused: %v", e)
+	}
+	if _, e := Load(writeConfig(t, map[string]any{"visualizerUrl": live + "?key=secret"})); e == nil || strings.Contains(e.Error(), "secret") {
+		t.Fatalf("a query on the page must be refused without repeating it: %v", e)
+	}
+}

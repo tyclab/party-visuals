@@ -1,7 +1,8 @@
 'use strict';
 // Bundle command/state endpoints: apply NodeCG authentication, origin checks and a host allowlist.
 // These checks prevent cross-site commands and DNS rebinding; clients without Origin remain supported.
-// GET api/cmd/<target>/<cmd> (Companion Generic HTTP), POST api/cmd { target, cmd }, GET api/state.
+// GET api/cmd/<target>/<cmd> (Companion Generic HTTP), POST api/cmd { target, cmd }, GET api/state,
+// and GET api/samples?g=&after= for the live-audio page (extension/samples.js).
 const net = require('node:net');
 
 const MAX_BODY = 16 * 1024;
@@ -74,7 +75,7 @@ function readJson(req) {
  * `{ ok, ... }`; `state()` is what api/state answers. Anything that is not
  * api/ goes on to NodeCG.
  */
-function createHttpHandler({ run, state, allowHosts = [] }) {
+function createHttpHandler({ run, state, samples = null, allowHosts = [] }) {
   return function partyVisualsHttp(req, res, next) {
     const url = new URL(req.url, 'http://bundle.invalid');
     const path = url.pathname;
@@ -82,6 +83,18 @@ function createHttpHandler({ run, state, allowHosts = [] }) {
     if (!hostAllowed(req.headers.host, allowHosts)) return send(res, 403, { ok: false, error: 'host not allowed (add it to allowHosts)' });
 
     if (path === '/api/state' && (req.method === 'GET' || req.method === 'HEAD')) return send(res, 200, state());
+
+    if (path === '/api/samples' && req.method === 'GET' && samples) {
+      // Read-only, but it starts the lightshow sending: no other site's page may ask.
+      const why = crossSiteReason(req);
+      if (why) return send(res, 403, { ok: false, error: why });
+      const number = (name) => (url.searchParams.has(name) && Number.isSafeInteger(Number(url.searchParams.get(name))) ? Number(url.searchParams.get(name)) : null);
+      let answered = false;
+      const respond = (body) => { if (!answered) { answered = true; send(res, body ? 200 : 503, body ?? { ok: false, error: 'too many pages are waiting for samples' }); } };
+      res.on('close', () => { if (!answered) { answered = true; samples.cancel(respond); } });
+      samples.pull({ g: number('g'), after: number('after') }, respond);
+      return undefined;
+    }
 
     const m = /^\/api\/cmd\/([^/]+)\/([^/]+)$/.exec(path);
     if (m && req.method === 'GET') {

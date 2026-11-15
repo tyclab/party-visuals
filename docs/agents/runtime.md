@@ -8,6 +8,12 @@ Read for this topic; paths below are relative to the repository root unless stat
 - Music Assistant 2.10.7 drives its visualizer from queue buffers. Connect traffic
   and audio that bypass those queues can play while the visualization stays black.
   Verify the current version and playback path before diagnosing rendering.
+- The live-audio page (`graphics/milkdrop.html`) draws from the engine's live input
+  instead. A calm page names its wait on screen and in `data-party-wait` (also the
+  helper's log): check that before the capture path. Its timing bound, idle rule and
+  dependency pins are in the README; keep `shared/samples.js`, `test/helpers/mock-relay.js`
+  and the engine's `samples` topic (lightshow `src/server/sample-relay.ts`, the commit the
+  mock names) in step.
 - A covered Chrome window can stop painting; bring the capture window to the
   foreground. The helper intentionally covers the visualizer while NodeCG is
   unreachable, so check NodeCG first when music plays behind a black screen.

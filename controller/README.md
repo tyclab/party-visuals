@@ -181,12 +181,15 @@ value of its now-playing page), names any missing prerequisite and runs Stage
 with the verified hash. Add `-Cutover` to activate the controller in the same
 run; visuals still begin Off and nothing is armed. `-MusicAssistantUrl`,
 `-Player`, `-ChromeExe`, `-NodeExe` and `-NodecgConfig` replace the prompts and
-defaults; `-ConfigPath` or `-ImportLegacy` go to Stage unchanged. Curtain, room
+defaults; `-LiveAudio` shows the bundle's live-audio visualizer instead of a Music
+Assistant player and asks for neither
+([Choosing the visualizer](../README.md#choosing-the-visualizer)); `-ConfigPath` or `-ImportLegacy` go to Stage unchanged. Curtain, room
 and panel output need a reviewed `-ConfigPath`. `SHA256SUMS` comes from the same
 release, so, as for tycswap's upgrade, it catches damaged or incomplete
 downloads but is no signature; `-ExpectedSha256` also pins the executable to a
-hash reviewed elsewhere, such as the release job log. After the first Start,
-sign in to Music Assistant once in the dedicated browser window.
+hash reviewed elsewhere, such as the release job log. After the first Start
+with a Music Assistant player, sign in to Music Assistant once in the dedicated
+browser window.
 
 To update, choose **Stop visuals and quit** in the tray, then run the line again
 with the new tag and `-Cutover`. The active configuration is kept. To change it,

@@ -56,6 +56,13 @@
           "maximum": 1000,
           "default": 0,
           "description": "Shift the graphics' beat: positive draws it earlier, to make up for a projector's or OBS's delay. Judge it on the real screen."
+        },
+        "presetSeconds": {
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 600,
+          "default": 30,
+          "description": "The live-audio visualizer's next preset after this many seconds of picture; time while it is calm does not count."
         }
       }
     },
