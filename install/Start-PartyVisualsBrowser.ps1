@@ -19,6 +19,7 @@ param(
     [ValidateRange(1, 65535)]
     [int] $Fixture = 53,
     [string] $StopFile = "$env:LOCALAPPDATA\PartyVisuals\browser-visuals.stop",
+    [string] $PreferredDisplay = '',
     [string] $TaskName = 'PartyVisuals Browser',
     [switch] $Stop,
     [switch] $Resume,
@@ -34,8 +35,75 @@ function Initialize-BrowserNative {
     if ('PartyBrowserNative' -as [type]) { return }
     Add-Type @'
 using System;
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 public static class PartyBrowserNative {
+ public class Screen { public string Device; public string[] Monitors; public int X, Y, Width, Height, Dpi; public bool Primary; }
+ [StructLayout(LayoutKind.Sequential)] public struct Luid { public uint Low; public int High; }
+ [StructLayout(LayoutKind.Sequential)] public struct PathInfo {
+  public Luid SourceAdapter; public uint SourceId, SourceMode, SourceFlags;
+  public Luid TargetAdapter; public uint TargetId, TargetMode, Technology, Rotation, Scaling, RefreshNumerator, RefreshDenominator, ScanLineOrdering; public int TargetAvailable; public uint TargetFlags;
+  public uint Flags;
+ }
+ [StructLayout(LayoutKind.Sequential, Size=64)] public struct ModeInfo { public uint Type; }
+ [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)] public struct SourceName {
+  public uint Type, Size; public Luid Adapter; public uint Id;
+  [MarshalAs(UnmanagedType.ByValTStr, SizeConst=32)] public string Device;
+ }
+ [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)] public struct TargetName {
+  public uint Type, Size; public Luid Adapter; public uint Id, Flags, Technology; public ushort Maker, Product; public uint Connector;
+  [MarshalAs(UnmanagedType.ByValTStr, SizeConst=64)] public string Monitor;
+  [MarshalAs(UnmanagedType.ByValTStr, SizeConst=128)] public string Path;
+ }
+ [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)] public struct MonitorInfo {
+  public int Size, Left, Top, Right, Bottom, WorkLeft, WorkTop, WorkRight, WorkBottom; public uint Flags;
+  [MarshalAs(UnmanagedType.ByValTStr, SizeConst=32)] public string Device;
+ }
+ delegate bool MonitorVisitor(IntPtr monitor, IntPtr dc, IntPtr rect, IntPtr data);
+ [DllImport("user32.dll")] static extern int GetDisplayConfigBufferSizes(uint flags, out uint paths, out uint modes);
+ [DllImport("user32.dll")] static extern int QueryDisplayConfig(uint flags, ref uint pathCount, [Out] PathInfo[] paths, ref uint modeCount, [Out] ModeInfo[] modes, IntPtr topology);
+ [DllImport("user32.dll")] static extern int DisplayConfigGetDeviceInfo(ref SourceName name);
+ [DllImport("user32.dll")] static extern int DisplayConfigGetDeviceInfo(ref TargetName name);
+ [DllImport("user32.dll")] static extern bool EnumDisplayMonitors(IntPtr dc, IntPtr clip, MonitorVisitor visit, IntPtr data);
+ [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern bool GetMonitorInfo(IntPtr monitor, ref MonitorInfo info);
+ [DllImport("shcore.dll")] static extern int GetDpiForMonitor(IntPtr monitor, int kind, out uint x, out uint y);
+ [DllImport("user32.dll")] static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
+ static Dictionary<string, List<string>> MonitorNames() {
+  var names = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+  uint pathCount, modeCount; PathInfo[] paths; int result;
+  do {
+   if (GetDisplayConfigBufferSizes(2, out pathCount, out modeCount) != 0) return names;
+   paths = new PathInfo[pathCount];
+   result = QueryDisplayConfig(2, ref pathCount, paths, ref modeCount, new ModeInfo[modeCount], IntPtr.Zero);
+  } while (result == 122);
+  if (result != 0) return names;
+  for (int i = 0; i < pathCount; i++) {
+   var source = new SourceName(); source.Type = 1; source.Size = (uint)Marshal.SizeOf(source); source.Adapter = paths[i].SourceAdapter; source.Id = paths[i].SourceId;
+   var target = new TargetName(); target.Type = 2; target.Size = (uint)Marshal.SizeOf(target); target.Adapter = paths[i].TargetAdapter; target.Id = paths[i].TargetId;
+   if (DisplayConfigGetDeviceInfo(ref source) != 0 || DisplayConfigGetDeviceInfo(ref target) != 0) continue;
+   if (!names.ContainsKey(source.Device)) names[source.Device] = new List<string>();
+   if (!String.IsNullOrEmpty(target.Monitor)) names[source.Device].Add(target.Monitor);
+  }
+  return names;
+ }
+ public static Screen[] Screens() {
+  var names = MonitorNames();
+  var found = new List<Screen>();
+  var previous = IntPtr.Zero;
+  try { previous = SetThreadDpiAwarenessContext(new IntPtr(-4)); } catch (EntryPointNotFoundException) { }
+  try {
+   EnumDisplayMonitors(IntPtr.Zero, IntPtr.Zero, delegate(IntPtr monitor, IntPtr dc, IntPtr rect, IntPtr data) {
+    var info = new MonitorInfo(); info.Size = Marshal.SizeOf(info);
+    if (!GetMonitorInfo(monitor, ref info)) return true;
+    uint dpi = 0, unused;
+    if (previous == IntPtr.Zero || GetDpiForMonitor(monitor, 0, out dpi, out unused) != 0) dpi = 0;
+    List<string> monitors;
+    found.Add(new Screen { Device = info.Device, Monitors = names.TryGetValue(info.Device, out monitors) ? monitors.ToArray() : new string[0], X = info.Left, Y = info.Top, Width = info.Right - info.Left, Height = info.Bottom - info.Top, Dpi = (int)dpi, Primary = (info.Flags & 1) != 0 });
+    return true;
+   }, IntPtr.Zero);
+  } finally { if (previous != IntPtr.Zero) SetThreadDpiAwarenessContext(previous); }
+  return found.ToArray();
+ }
  [DllImport("shell32.dll", CharSet=CharSet.Unicode, SetLastError=true)] static extern IntPtr CommandLineToArgvW(string command, out int count);
  [DllImport("kernel32.dll")] static extern IntPtr LocalFree(IntPtr memory);
  public static string[] Arguments(string command) {
@@ -70,8 +138,9 @@ function ConvertTo-NativeArgument([string] $Value) {
     return '"' + [regex]::Replace([regex]::Replace($Value, '(\\*)"', '$1$1\"'), '(\\+)$', '$1$1') + '"'
 }
 
-# No window geometry: Chrome reopens the app window on the screen where it was last left.
-function Get-BrowserArguments {
+# Without a placement Chrome reopens the app window where it was last left; a placement's
+# position and size, in Chrome's device-independent pixels, override that saved place.
+function Get-BrowserArguments($Placement = $null) {
     @('--user-data-dir=' + $BrowserProfile)
     '--remote-debugging-address=127.0.0.1'
     '--remote-debugging-port=0'
@@ -81,7 +150,56 @@ function Get-BrowserArguments {
     '--no-first-run'
     '--no-default-browser-check'
     '--start-fullscreen'
+    if ($null -ne $Placement -and $Placement.Position) { '--window-position=' + $Placement.Position; '--window-size=' + $Placement.Size }
     '--app=' + $VisualizerUrl
+}
+
+function Get-VisualsScreens {
+    Initialize-BrowserNative
+    @([PartyBrowserNative]::Screens())
+}
+
+# The preferred display unless it reads off; else the leftmost, then topmost, screen that is
+# not the primary; else the primary. Power: none (no reading configured), on, off or unknown.
+function Select-VisualsScreen($Screens, [string] $Preferred, [ValidateSet('none', 'on', 'off', 'unknown')][string] $Power) {
+    $all = @($Screens | Where-Object { $null -ne $_ })
+    $ordered = @($all | Sort-Object @{ Expression = { [bool]$_.Primary } }, @{ Expression = { [int]$_.X } }, @{ Expression = { [int]$_.Y } })
+    $named = @($ordered | Where-Object { @($_.Monitors) -contains $Preferred })
+    $placement = [pscustomobject]@{ Screen = $null; PreferredListed = $named.Count -gt 0; Reason = 'Windows listed no screen'; Position = $null; Size = $null }
+    if ($all.Count -eq 0) { return $placement }
+    if ($named.Count -and $Power -ne 'off') {
+        $placement.Screen = $named[0]
+        $placement.Reason = 'the preferred display ' + @{ none = 'is connected'; on = 'is connected and on'; unknown = 'is connected; its power is not known' }[$Power]
+    } else {
+        $why = if ($named.Count) { 'the preferred display is off' } else { 'the preferred display is not connected' }
+        $others = @($ordered | Where-Object { -not $_.Primary -and $named -notcontains $_ })
+        if ($others.Count) { $placement.Screen = $others[0]; $placement.Reason = $why + '; first screen other than the primary' }
+        else { $placement.Screen = @(@($ordered | Where-Object { $_.Primary }) + $ordered)[0]; $placement.Reason = $why + '; no screen other than the primary' }
+    }
+    return Add-VisualsGeometry $placement $all
+}
+
+# Sets the placement's position and size in Chrome's device-independent pixels, or says why not.
+function Add-VisualsGeometry($Placement, $Screens) {
+    $dpis = @($Screens | ForEach-Object { [int]$_.Dpi } | Sort-Object -Unique)
+    $kept = ', so Chrome opens the window where it was last left'
+    if ($dpis -contains 0) { $Placement.Reason += "; Windows did not report every screen's scale factor$kept"; return $Placement }
+    # Chrome lays out screens of different scale factors outward from the primary; only one shared factor maps exactly.
+    if ($dpis.Count -gt 1) { $Placement.Reason += '; screens have different scale factors (' + (@($dpis | ForEach-Object { '{0} %' -f [int][Math]::Round($_ * 100 / 96) }) -join ', ') + ")$kept"; return $Placement }
+    $scale = $dpis[0] / 96
+    $screen = $Placement.Screen
+    $left = [int][Math]::Floor($screen.X / $scale)
+    $top = [int][Math]::Floor($screen.Y / $scale)
+    $Placement.Position = '{0},{1}' -f $left, $top
+    $Placement.Size = '{0},{1}' -f ([int][Math]::Ceiling(($screen.X + $screen.Width) / $scale) - $left), ([int][Math]::Ceiling(($screen.Y + $screen.Height) / $scale) - $top)
+    return $Placement
+}
+
+function Format-VisualsPlacement($Placement) {
+    $screen = $Placement.Screen
+    if ($null -eq $screen) { return $Placement.Reason }
+    $monitors = if (@($screen.Monitors).Count) { @($screen.Monitors) -join ' + ' } else { 'unnamed monitor' }
+    '{0} ({1}, {2}x{3} at {4},{5}): {6}' -f $screen.Device, $monitors, $screen.Width, $screen.Height, $screen.X, $screen.Y, $Placement.Reason
 }
 
 function Get-HelperArguments {
@@ -189,13 +307,15 @@ function Close-VisualsBrowser($Browser) {
     [void]$Browser.WaitForExit(5000)
 }
 
-function Open-VisualsBrowser {
+function Open-VisualsBrowser([string] $Power = 'none') {
+    $script:VisualsPlacement = $null
     $browser = Get-ProfileBrowser
     if ($null -eq $browser) {
+        if ($PreferredDisplay) { $script:VisualsPlacement = Select-VisualsScreen (Get-VisualsScreens) $PreferredDisplay $Power }
         New-Item -ItemType Directory -Path $BrowserProfile -Force | Out-Null
         $portFile = Join-Path $BrowserProfile 'DevToolsActivePort'
         if (Test-Path -LiteralPath $portFile) { Remove-Item -LiteralPath $portFile }
-        $launch = ((Get-BrowserArguments | ForEach-Object { ConvertTo-NativeArgument $_ }) -join ' ')
+        $launch = ((Get-BrowserArguments $script:VisualsPlacement | ForEach-Object { ConvertTo-NativeArgument $_ }) -join ' ')
         $browser = Start-Process -FilePath $ChromeExe -WorkingDirectory (Split-Path -Parent $ChromeExe) -ArgumentList $launch -PassThru
     }
     # A held handle keeps an adopted browser's exit visible after Windows reuses its process ID.
@@ -253,7 +373,8 @@ function Start-VisualsBrowser {
                 $browser = Open-VisualsBrowser
                 $startedAt = $browser.StartTime.ToUniversalTime()
                 $station = $session.Station
-                if (-not $shown) { Write-Host 'The visuals browser is open; move it to any screen (F11 toggles fullscreen).' }
+                if ($null -ne $script:VisualsPlacement) { Write-Host ('The visuals browser opens on ' + (Format-VisualsPlacement $script:VisualsPlacement)) }
+                elseif (-not $shown) { Write-Host 'The visuals browser is open; move it to any screen (F11 toggles fullscreen).' }
                 $shown = $true
             }
             if ($null -ne $helper -and $helper.HasExited) {

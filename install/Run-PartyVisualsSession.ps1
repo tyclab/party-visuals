@@ -1,6 +1,6 @@
 #Requires -Version 5.1
 [CmdletBinding()]
-param([Parameter(Mandatory = $true)][string] $ConfigPath)
+param([Parameter(Mandatory = $true)][string] $ConfigPath, [ValidateSet('none', 'on', 'off', 'unknown')][string] $DisplayPower = 'none')
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
 
@@ -25,6 +25,7 @@ $Room = [bool]$config.room
 $Panels = [string]$config.panels
 $Fixture = [int]$config.fixture
 $Fps = [int]$config.fps
+$PreferredDisplay = if ($config.PSObject.Properties['preferredDisplay']) { [string]$config.preferredDisplay } else { '' }
 $nodecg = $null; $browser = $null; $helper = $null
 $nodeOwned = $false; $browserOwned = $false
 Initialize-NodecgNative
@@ -44,7 +45,8 @@ try {
     $listeners = @(Get-NetTCPConnection -LocalPort $controls.Port -State Listen -ErrorAction SilentlyContinue)
     if ($listeners.Count) { throw 'NodeCG port is already in use outside this controller; no second instance was started.' }
     $nodecg = Start-NodecgProcess $log
-    $browser = Open-VisualsBrowser
+    $browser = Open-VisualsBrowser $DisplayPower
+    if ($null -ne $VisualsPlacement) { [Console]::WriteLine((@{ event = 'display'; text = (Format-VisualsPlacement $VisualsPlacement); preferredListed = $VisualsPlacement.PreferredListed } | ConvertTo-Json -Compress)) }
     $helper = Start-BrowserHelper
     [Console]::WriteLine('{"event":"ready"}')
     $inputLine = [Console]::In.ReadLineAsync()
