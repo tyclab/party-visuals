@@ -40,12 +40,15 @@
 
     /** The next preset `load(name)` takes; one it throws on is counted in `failed` and left out from then on. Null when none loads. */
     load(load) {
+      // A preset that does not compile was never shown: the next round must not start with the one still on screen.
+      const shown = this.current;
       while (this.names.length) {
         const name = this.next();
         try {
           load(name);
           return name;
         } catch {
+          this.current = shown;
           this.failed.push(name);
           this.names = this.names.filter((n) => n !== name);
           this.round = this.round.filter((n) => n !== name);

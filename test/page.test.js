@@ -50,7 +50,7 @@ function source(show) {
   };
 }
 
-/** The extension under the parts of NodeCG's API it uses, and the bundle's files at NodeCG's paths. */
+/** The extension under the parts of NodeCG's API it uses, and the bundle's files at NodeCG's paths; `samples(req, res)`, when set, answers api/samples instead. */
 async function serveBundle(show) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'party-visuals-page-'));
   fs.writeFileSync(path.join(dir, 'token'), `${TOKEN}\n`);
@@ -65,11 +65,13 @@ async function serveBundle(show) {
     mount: (prefix, mounted) => { router = mounted; },
     on: (event, fn) => events.on(event, fn),
   });
+  const bundle = { samples: null };
   const server = http.createServer((req, res) => {
     const url = new URL(req.url, 'http://bundle.invalid'), prefix = '/bundles/party-visuals';
     const notFound = () => { res.statusCode = 404; res.end(); };
     if (!url.pathname.startsWith(`${prefix}/`)) return notFound();
     const rest = url.pathname.slice(prefix.length);
+    if (rest === '/api/samples' && bundle.samples) return bundle.samples(req, res);
     if (rest.startsWith('/api/')) {
       req.url = rest + url.search;
       return router.handlers[0](req, res, notFound);
@@ -81,12 +83,12 @@ async function serveBundle(show) {
     return res.end(fs.readFileSync(file));
   });
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  return { origin: `http://127.0.0.1:${server.address().port}`, async close() {
+  return Object.assign(bundle, { origin: `http://127.0.0.1:${server.address().port}`, async close() {
     events.emit('serverStopping');
     server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
     fs.rmSync(dir, { recursive: true, force: true });
-  } };
+  } });
 }
 
 // For each frame: how far the samples handed to the renderer swing from silence (128), and the renderer's own
@@ -153,15 +155,19 @@ async function openPage(t, script) {
       canvas: document.querySelector('[data-party-visualizer-canvas]').width,
       opacity: Number(getComputedStyle(document.querySelector('[data-party-visualizer-layer]')).opacity), status: document.querySelector('[role="status"]').textContent };
   }, since);
-  return { page, look, outside, errors, open: () => page.goto(`${origin}/bundles/party-visuals/graphics/milkdrop.html`) };
+  // Each test needs a Chromium that draws WebGL 2; without one it says so instead of failing on the page's `webgl`.
+  const open = async () => {
+    await page.goto(`${origin}/bundles/party-visuals/graphics/milkdrop.html`);
+    assert.equal(await page.evaluate(() => !!document.createElement('canvas').getContext('webgl2')), true,
+      'this Chromium draws no WebGL 2: see PARTY_VISUALS_BROWSER_CHANNEL in this file');
+  };
+  return { page, look, outside, errors, open };
 }
 
 test('the live-audio page draws from the live input, goes calm on silence and on a refused or hung endpoint, survives a lost context and a restart, and asks nothing beyond its origin', { timeout: 120_000 }, async (t) => {
   const { sound } = shared;
   const { page, look, outside, errors, open } = await openPage(t);
   await open();
-  assert.equal(await page.evaluate(() => !!document.createElement('canvas').getContext('webgl2')), true,
-    'this Chromium draws no WebGL 2: see PARTY_VISUALS_BROWSER_CHANNEL in this file');
   // Any render since `count` handed loud samples, and the renderer's own band energy rose with them. On a slow
   // renderer many frames get silence, the bound holding, so not every frame has to.
   const loudAfter = (count) => until(async () => { const now = await look(count); return now.frames > count + 10 && now.loud > 30 && now.energy > 1 && now; },
@@ -194,15 +200,30 @@ test('the live-audio page draws from the live input, goes calm on silence and on
   await loudAfter((await look()).frames);
 
   // Its own reason for a refused, an erroring, a garbled or a hung samples endpoint, and back when it answers again.
-  for (const [wait, answer] of [['busy', (route) => route.fulfill({ status: 503, body: '{}' })], ['endpoint', (route) => route.fulfill({ status: 500, body: 'no' })],
-    ['data', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ wait: null, g: 1, end: 9, rate: 22050, ageMs: 1, heldMs: 0, data: '@@@' }) })],
-    ['nodecg', () => {}]]) {
-    await page.route('**/api/samples*', answer);
-    const calm = await until(async () => { const now = await look(); return now.wait === wait && now; }, `${wait} said`, 5000);
+  // A body cut short after its headers, by a reset or by the page's own two-second abort, is the connection's fault.
+  const cut = (end) => (req, res) => {
+    res.writeHead(200, { 'content-type': 'application/json', 'content-length': '4096' });
+    res.write('{"wait":null,"g":1,');
+    end(res);
+  };
+  const json = { status: 200, contentType: 'application/json' };
+  for (const [wait, why, answer] of [
+    ['busy', 'a refusal', { route: (route) => route.fulfill({ status: 503, body: '{}' }) }],
+    ['endpoint', 'an error', { route: (route) => route.fulfill({ status: 500, body: 'no' }) }],
+    ['data', 'garbled samples', { route: (route) => route.fulfill({ ...json, body: JSON.stringify({ wait: null, g: 1, end: 9, rate: 22050, ageMs: 1, heldMs: 0, data: '@@@' }) }) }],
+    ['data', 'a whole body that is not JSON', { route: (route) => route.fulfill({ ...json, body: '{"wait":null,' }) }],
+    ['nodecg', 'no answer', { route: () => {} }],
+    ['nodecg', 'a body reset after its headers', { samples: cut((res) => setTimeout(() => res.destroy(), 100)) }],
+    ['nodecg', 'a body held past the pull timeout', { samples: cut(() => {}) }],
+  ]) {
+    if (answer.route) await page.route('**/api/samples*', answer.route);
+    shared.bundle.samples = answer.samples || null;
+    const calm = await until(async () => { const now = await look(); return now.wait === wait && now; }, `${wait} said for ${why}`, 5000);
     assert.notEqual(calm.status, '');
-    await until(async () => (await look()).opacity === 0, `the picture faded out for ${wait}`, 3000);
+    await until(async () => (await look()).opacity === 0, `the picture faded out for ${why}`, 3000);
     await page.unrouteAll({ behavior: 'ignoreErrors' });
-    await until(async () => { const now = await look(); return now.wait === null && now.opacity === 1 && now; }, `back after ${wait}`, 6000);
+    shared.bundle.samples = null;
+    await until(async () => { const now = await look(); return now.wait === null && now.opacity === 1 && now; }, `back after ${why}`, 6000);
   }
 
   // A lost graphics context: hidden at once with its reason, then the page loads again by itself.
