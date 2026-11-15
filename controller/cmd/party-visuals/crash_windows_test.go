@@ -18,6 +18,7 @@ func TestACrashReportLandsInControllerLog(t *testing.T) {
 		if e != nil || releaseAppConsole(f) != nil {
 			os.Exit(9)
 		}
+		f.Close() // as owned does while a panic unwinds: the report has its own handle
 		go func() { panic("party test crash") }()
 		time.Sleep(time.Minute)
 		os.Exit(8)

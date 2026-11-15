@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -417,5 +418,67 @@ func TestAControllerThatCannotStartSaysWhyInControllerLog(t *testing.T) {
 	b, _ = os.ReadFile(filepath.Join(root, "controller.log"))
 	if !strings.Contains(string(b), "no standard error handle") || !strings.Contains(string(b), "controller dev started\n") {
 		t.Fatalf("controller.log holds %q", b)
+	}
+}
+
+func TestEveryRefusedStartIsNamedInControllerLog(t *testing.T) {
+	refused := func(root, why string) {
+		t.Helper()
+		ran := false
+		if e := owned(root, func(string, worker.Config, *controllerLog) error { ran = true; return nil }); e == nil || ran {
+			t.Fatalf("%s started a controller: %v", why, e)
+		}
+		b, _ := os.ReadFile(filepath.Join(root, "controller.log"))
+		if !strings.HasSuffix(string(b), "\n") || !strings.Contains(string(b[max(0, len(b)-400):]), "controller did not start: ") {
+			t.Fatalf("%s: controller.log ends with %q", why, b[max(0, len(b)-400):])
+		}
+	}
+	root := writeRoot(t, nil)
+	l, e := owner.Acquire(root)
+	if e != nil {
+		t.Fatal(e)
+	}
+	refused(root, "a folder another controller owns")
+	l.Close()
+	// A log over 1 MiB that cannot be moved aside: controller.log.1 is a folder with a file in it.
+	root = writeRoot(t, nil)
+	os.WriteFile(filepath.Join(root, "controller.log"), bytes.Repeat([]byte("earlier line\n"), 100000), 0600)
+	os.MkdirAll(filepath.Join(root, "controller.log.1", "kept"), 0700)
+	refused(root, "a log that cannot be opened")
+}
+
+type refusingStore struct {
+	lifecycle.FileStore
+	refuse bool
+}
+
+func (s *refusingStore) Save(i lifecycle.Intent) error {
+	if s.refuse {
+		return errors.New("disk refused")
+	}
+	return s.FileStore.Save(i)
+}
+
+func TestAnOffThatCloseCouldNotSaveIsNamedInControllerLog(t *testing.T) {
+	store := &refusingStore{FileStore: lifecycle.FileStore{Path: filepath.Join(t.TempDir(), "intent.json")}}
+	m, e := lifecycle.New(store, &restoredWindows{}, nil)
+	if e != nil {
+		t.Fatal(e)
+	}
+	m.Apply("follow-party")
+	m.Apply("start")
+	store.refuse = true
+	if e = m.Apply("stop"); e == nil {
+		t.Fatal("failed save reported success")
+	}
+	var out bytes.Buffer
+	closing(m, &controllerLog{Logger: log.New(&out, "", 0)})
+	if !strings.Contains(out.String(), "controller closed: Off was not saved") || !strings.Contains(out.String(), "disk refused") {
+		t.Fatalf("controller.log holds %q", out.String())
+	}
+	out.Reset()
+	closing(m, &controllerLog{Logger: log.New(&out, "", 0)})
+	if out.Len() != 0 {
+		t.Fatalf("a Close with nothing left to do logged %q", out.String())
 	}
 }

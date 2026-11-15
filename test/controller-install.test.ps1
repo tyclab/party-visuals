@@ -89,12 +89,15 @@ try {
     $loaded = Get-Content -LiteralPath $path -Raw | ConvertFrom-Json
     Check 'cutover stops the running controller before it takes the lock, and visuals begin Off' (($script:events -join ',') -eq 'check,disabled,quit,registered,start,ready' -and $loaded.manualOff -and -not $loaded.requested -and $journal.phase -eq 'active')
     function Register-ControllerTask($Exe) { throw 'registration refused' }
+    function Enable-ScheduledTask($TaskName) { $script:events += 'enabled' }
+    function Set-ScheduledTask { $script:events += 'set' }
+    function Register-ScheduledTask { $script:events += 'registered directly' }
     $script:events = @()
     $failed = $false
     try { Cutover-Controller $journal } catch { $failed = $true }
     $held = $false
     try { (Enter-ControllerOwnership).Dispose() } catch { $held = $true }
-    Check 'a cutover that fails leaves the task disabled and lets go of the lock' ($failed -and ($script:events -join ',') -eq 'check,disabled,quit' -and -not $held)
+    Check 'a cutover that fails before it registers leaves the task disabled and lets go of the lock' ($failed -and ($script:events -join ',') -eq 'check,disabled,quit' -and -not $held)
     $ControllerStopSeconds = 1
     $owner = Enter-ControllerOwnership
     $script:events = @()
