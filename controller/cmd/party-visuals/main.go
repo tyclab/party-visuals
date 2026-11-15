@@ -251,14 +251,7 @@ func serve(root string, c worker.Config, logger *controllerLog) error {
 			return m.Apply(command)
 		}
 	}
-	trayCommand := logger.command("tray", command)
-	t, e = tray.New(icon(), tray.Options{Name: "Party Visuals", Identifier: "io.tyclab.partyvisuals.controller", Tooltip: "Party Visuals", OnClick: func(c string) {
-		go func() {
-			if e := trayCommand(c); e != nil {
-				t.Notify("Party Visuals", e.Error())
-			}
-		}()
-	}, OnSystemEvent: func(event string) {
+	systemEvent := func(event string) {
 		if event == "display-change" && m.Snapshot().Suspended {
 			return
 		}
@@ -283,7 +276,15 @@ func serve(root string, c worker.Config, logger *controllerLog) error {
 				}
 			}()
 		}
-	}})
+	}
+	trayCommand := logger.command("tray", command)
+	t, e = tray.New(icon(), tray.Options{Name: "Party Visuals", Identifier: "io.tyclab.partyvisuals.controller", Tooltip: "Party Visuals", OnClick: func(c string) {
+		go func() {
+			if e := trayCommand(c); e != nil {
+				t.Notify("Party Visuals", e.Error())
+			}
+		}()
+	}, OnSystemEvent: systemEvent})
 	if e != nil {
 		return e
 	}
@@ -292,7 +293,18 @@ func serve(root string, c worker.Config, logger *controllerLog) error {
 			t.Notify("Party Visuals", text)
 		}
 	}
-	m, _, e = startManager(ctx, root, &worker.Backend{Config: c, ConfigPath: filepath.Join(root, "config.json"), Notice: notice}, func(s lifecycle.Status) {
+	var backend *worker.Backend
+	var power *partysource.Power
+	if c.DisplayPowerEntity != "" {
+		power = partysource.NewPower(partysource.Config{URL: c.HomeAssistantURL, TokenFile: c.HomeAssistantTokenFile, Entity: c.DisplayPowerEntity, Poll: time.Duration(c.PartyPollMs) * time.Millisecond}, logger.Printf, func() {
+			if m.Snapshot().Phase == "running" && backend.Placement().Stale(power.Reading()) {
+				logger.Printf("Display power: %s settled at %s; reopening the visuals", c.DisplayPowerEntity, power.Reading())
+				systemEvent("display-change")
+			}
+		})
+	}
+	backend = &worker.Backend{Config: c, ConfigPath: filepath.Join(root, "config.json"), Notice: notice, Power: power.Reading, Placed: func(p worker.Placement) { logger.Printf("visuals open on %s", p.Text) }}
+	m, _, e = startManager(ctx, root, backend, func(s lifecycle.Status) {
 		logger.state(s)
 		source.SetActive(s.Intent.Mode == "follow-party")
 		refresh(s)
@@ -311,12 +323,21 @@ func serve(root string, c worker.Config, logger *controllerLog) error {
 		source.SetActive(m.Snapshot().Intent.Mode == "follow-party")
 		go source.Run(ctx)
 	}
+	if power != nil {
+		go power.Run(ctx)
+	}
 	go func() {
 		tick := time.NewTicker(3 * time.Second)
 		defer tick.Stop()
 		for {
 			d := worker.Diagnose(ctx, c)
 			d.Browser = logger.browserNote()
+			if m.Snapshot().Phase == "running" {
+				d.Display = backend.Placement().Text
+			}
+			if power != nil {
+				d.DisplayPower = power.Status().Summary
+			}
 			diagMu.Lock()
 			diag = d
 			diagMu.Unlock()
@@ -384,6 +405,12 @@ func startManager(ctx context.Context, root string, backend lifecycle.Backend, c
 
 func diagnosticLines(d worker.Diagnostics, p partysource.Status) []string {
 	lines := []string{"Screen: " + d.Screen, "Audio: " + d.Audio, "OpenRGB: " + d.OpenRGB, "Follow Party: " + p.Summary}
+	if d.Display != "" {
+		lines = append(lines, "Display: "+d.Display)
+	}
+	if d.DisplayPower != "" {
+		lines = append(lines, "Display power: "+d.DisplayPower)
+	}
 	if d.Browser != "" {
 		lines = append(lines, "Browser: "+d.Browser)
 	}
