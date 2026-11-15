@@ -90,6 +90,8 @@ try {
     Check 'cutover stops the running controller before it takes the lock, and visuals begin Off' (($script:events -join ',') -eq 'check,disabled,quit,registered,start,ready' -and $loaded.manualOff -and -not $loaded.requested -and $journal.phase -eq 'active')
     function Register-ControllerTask($Exe) { throw 'registration refused' }
     function Enable-ScheduledTask($TaskName) { $script:events += 'enabled' }
+    function Set-ScheduledTask { $script:events += 'set' }
+    function Register-ScheduledTask { $script:events += 'registered directly' }
     $script:events = @()
     $failed = $false
     try { Cutover-Controller $journal } catch { $failed = $true }

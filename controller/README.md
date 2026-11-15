@@ -124,12 +124,14 @@ visuals stay Off, as Stop recorded, and the tray icon returns. To keep the
 controller closed, disable the task first
 (`Disable-ScheduledTask -TaskName 'PartyVisuals Controller'`), then quit.
 
-A Stop whose Off cannot be written to `intent.json` still stops the visuals.
-The status says `Could not persist Off` until a later save works, and each
-further Stop, and the quit, answers with the error meanwhile: a controller
-that ended now would come back with the Start. One that ends anyway, for
-example on Ctrl+C in a console, writes `controller closed: Off was not
-saved, …` to `controller.log`.
+A Stop whose Off cannot be written to `intent.json` still stops the visuals,
+and each further Stop answers with the error until a save works. The status
+says `Could not persist Off` meanwhile, unless a worker that did not stop is
+the reason it shows. In Follow Party the quit is refused as well: a controller
+that ended now would come back with the Start. In Manual mode the quit goes
+through, since no controller starts visuals there on its own. One that ends
+with the Off unsaved, for example on Ctrl+C in a console, writes
+`controller closed: Off was not saved, …` to `controller.log`.
 
 `controller.log` says why a controller ended. One that cannot start, for
 example because its configuration is refused or another controller holds the
@@ -238,11 +240,13 @@ browser window.
 To update, run the line again with the new tag and `-Cutover`. Cutover asks the
 running controller to quit, waits until it has let go of its folder, registers
 the new one and starts it. Visuals begin Off, also where Follow Party had a
-Start, so Start them again afterwards. A cutover that fails before it
-registers the new controller leaves the controller's task disabled, as it
-leaves the legacy tasks. One that fails later, because the new controller did
-not come up Off within 30 seconds, leaves the new task registered, and it
-keeps asking every minute. Either way run it again once the cause is resolved.
+Start, so Start them again afterwards. A cutover that fails at its first
+checks changes nothing. One that fails after it has asked the running
+controller to quit leaves the controller's task disabled, as it leaves the
+legacy tasks. One that fails once the new controller is registered, usually
+because it did not come up Off within 30 seconds, leaves the new task
+registered, and it keeps asking every minute. In each case run it again once
+the cause is resolved.
 The active configuration is kept. To change it,
 for example to add the Home Assistant keys, edit a copy of
 `%LOCALAPPDATA%\PartyVisuals\controller\config.json` and add
