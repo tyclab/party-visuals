@@ -290,8 +290,9 @@ To bring the live-audio page to a show PC that runs an older setup, in this orde
    [lightshow #214](https://github.com/tyclab/lightshow/pull/214) on; an older helper
    still captures the page but logs `presets` and `data` as "waiting for sound",
    `renderer` as "no WebGL 2?", and leaves them out of its status file.
-3. **The bundle**: `Install-PartyVisuals.ps1` (its default bundle is `da1c162`, the first
-   with the page; `-BundleRef` takes a later commit or release tag), then stop and start
+3. **The bundle**: `Install-PartyVisuals.ps1` (its default bundle is `4435a3a`, release
+   v0.1.3; `da1c162` was the first with the page; `-BundleRef` takes a later commit or
+   release tag), then stop and start
    NodeCG.
 4. **The configuration**: `visualizerUrl` in a copy of the controller's `config.json`,
    checked with `party-visuals.exe check` and staged with `-ConfigPath`
