@@ -5,9 +5,9 @@ tray and login task address that owner. Manual Off survives sleep, unlock,
 sign-in and retries. Closing the menu leaves visuals running; Stop records Off
 before shutdown. A closed browser leaves visuals Off until Start, and so does
 a controller that starts in Manual mode with a Start left over, avoiding a guess
-about whether an exit was deliberate. In Follow Party the Start stays across a
-restart of the controller or of Windows: the party state decides whether
-visuals run, so there is nothing to guess.
+about whether an exit was deliberate. In Follow Party and Follow Lightshow the
+Start stays across a restart of the controller or of Windows: the followed
+state decides whether visuals run, so there is nothing to guess.
 
 The executable reuses tycswap's public native tray adapter at the pinned Go
 revision. It does not run tycswap, use its accounts or require WSL. Automatic
@@ -32,6 +32,7 @@ party-visuals stop
 party-visuals status --json
 party-visuals diagnostics
 party-visuals mode follow-party
+party-visuals mode follow-lightshow
 party-visuals party on
 party-visuals party off
 party-visuals mode manual
@@ -40,7 +41,8 @@ party-visuals quit
 
 `--root PATH` precedes the command for a non-default controller directory.
 `diagnostics` prints the phase and the tray's diagnostic lines; `status --json`
-holds everything, the Follow Party source under `followParty`.
+holds everything, the two follow sources under `followParty` and
+`followLightshow`.
 
 `controller.log` in the controller directory records each tray and CLI command
 (the interactive menu sends its commands through the CLI) with its source and
@@ -57,6 +59,8 @@ selected it reads one entity (`GET /api/states/<entity>` with a bearer token)
 every `partyPollMs` and sends `party on` when the state equals `partyValue`,
 `party off` for any other state. It sends once per change, and once for the
 first reading after each switch to Follow Party. Manual mode polls nothing.
+A reading is taken only while the mode it was read for is still selected, so
+one that arrives just after a switch changes nothing.
 A failed reading (error, timeout, `unavailable`, `unknown`) keeps the last
 party state and retries after doubling delays of at most 60 s. Home Assistant
 counts every rejected bearer toward its IP ban, so an empty token file is
@@ -66,16 +70,39 @@ entity next changes. Each transition and failed reading is appended to
 `controller.log` in the controller directory; `diagnostics`, the tray and
 `status --json` show the source's state.
 
+Follow Lightshow is the same opt-in with its own entity: select it in the tray,
+as 7 in the interactive menu or with `mode follow-lightshow`, then Start. It
+runs visuals while `lightshowEntity` equals `lightshowValue`, typically a
+Home Assistant template binary sensor that is on while the lighting engine is
+armed and paints from this PC's picture, and stops them when it no longer
+does. Everything above holds for it: Stop overrides it, the Start survives a
+restart, and `party on|off` sets its state by hand until the entity changes.
+
+One poller serves both follow modes and reads only the selected mode's
+entity, so switching leaves no other entity polled, and a rejected token stops
+polling for both. A switch between Follow Party and Follow Lightshow starts
+and stops nothing by itself: visuals that run or are starting carry on until
+the new mode's first reading, which is applied whatever it says, and
+otherwise nothing starts before that reading asks for it. Visuals carried on
+this way that then stop, by Stop, sleep or a closed window, start again only
+on the new mode's reading. The same holds when the switch goes by way of
+Manual: a reading one follow mode took does not start visuals in the other. Switching to Manual mode and back to the same
+follow mode works as for Follow Party.
+
 The source is configured by optional keys in the controller's `config.json`.
-Without them nothing polls, Follow Party waits for `party on`, and diagnostics
-read "Follow Party: no Home Assistant source configured".
+Without them nothing polls, each follow mode waits for `party on`, and
+diagnostics read "Follow Party: no Home Assistant source configured" and the
+same for Follow Lightshow. Follow Lightshow polls only with `lightshowEntity`;
+without it, it reads "Follow Lightshow: no Home Assistant source configured".
 
 ```json
 "homeAssistantUrl": "https://ha.example.invalid:8123",
 "homeAssistantTokenFile": "C:\\Users\\<user>\\AppData\\Local\\PartyVisuals\\controller\\ha.token",
 "partyEntity": "sensor.house_mode_code",
 "partyValue": "3",
-"partyPollMs": 5000
+"partyPollMs": 5000,
+"lightshowEntity": "binary_sensor.engine_visualizer",
+"lightshowValue": "on"
 ```
 
 The URL must be https. The token file holds one Home Assistant long-lived
@@ -91,11 +118,13 @@ without a DACL counts as open to Everyone. A conditional entry (an allow entry
 with a condition, such as group membership) for another account is refused too,
 as `… has a conditional entry for <account>, which the controller does not
 evaluate`. The account is named for well-known and built-in accounts and given
-by its SID otherwise, so the check never waits for a domain controller. The
-last three keys default to the values shown; `partyPollMs` takes 1000 to 60000.
-`check`, and with it Stage, refuses an http URL, a relative token path, an
-unreadable or empty token file, a token file other accounts can open and a
-malformed entity id.
+by its SID otherwise, so the check never waits for a domain controller.
+`partyEntity`, `partyValue` and `partyPollMs` default to the values shown;
+`partyPollMs` takes 1000 to 60000 and sets the interval for both follow modes.
+`lightshowValue` defaults to `on`; `lightshowEntity` has no default and needs
+`homeAssistantUrl`. `check`, and with it Stage, refuses an http URL, a relative
+token path, an unreadable or empty token file, a token file other accounts can
+open and a malformed entity id.
 
 Diagnostics separate screen/helper, Lightshow analysis audio, output eligibility
 and OpenRGB SDK. Analysis frames do not prove the page has audio to draw: Music
@@ -114,10 +143,10 @@ The **PartyVisuals Controller** task starts the controller at sign-in and asks
 again every minute. While the controller runs, Task Scheduler drops that start
 (the task ignores new instances); after any exit the controller is back within
 a minute. Task Scheduler's restart-on-failure covers a start that failed, not
-an exit, whatever its code. A controller that ran visuals in Follow Party
-resumes them once it knows there is a party: from its first reading where a
-Home Assistant source is configured, from the next `party on` otherwise. In
-Manual mode it comes back Off.
+an exit, whatever its code. A controller that ran visuals in Follow Party or
+Follow Lightshow resumes them once its source asks: from its first reading
+where a Home Assistant source is configured, from the next `party on`
+otherwise. In Manual mode it comes back Off.
 
 **Stop visuals and quit** therefore ends the controller for at most a minute:
 visuals stay Off, as Stop recorded, and the tray icon returns. To keep the
@@ -127,11 +156,11 @@ controller closed, disable the task first
 A Stop whose Off cannot be written to `intent.json` still stops the visuals,
 and each further Stop answers with the error until a save works. The status
 says `Could not persist Off` meanwhile, unless a worker that did not stop is
-the reason it shows. In Follow Party the quit is refused as well: a controller
-that ended now would come back with the Start. In Manual mode the quit goes
-through, since no controller starts visuals there on its own. One that ends
-with the Off unsaved, for example on Ctrl+C in a console, writes
-`controller closed: Off was not saved, …` to `controller.log`.
+the reason it shows. In Follow Party and Follow Lightshow the quit is refused
+as well: a controller that ended now would come back with the Start. In
+Manual mode the quit goes through, since no controller starts visuals there
+on its own. One that ends with the Off unsaved, for example on Ctrl+C in a
+console, writes `controller closed: Off was not saved, …` to `controller.log`.
 
 `controller.log` says why a controller ended. One that cannot start, for
 example because its configuration is refused or another controller holds the
@@ -184,10 +213,11 @@ While one stays open, Start is refused with "A browser window restored by
 Windows at sign-in is open; close it before Start." A window that could not be
 ended is not tried again until the next Start, and is forgotten once it is
 gone. Within the first 10 minutes, the first sweep that finds no restored
-window left returns a Start refused this way to Off, or in Follow Party, which
-keeps its Start across sign-in, tries it again; later the refusal stays
-until the next Start, which sweeps again, or Stop. The Windows setting is left
-as it is; turning it off also avoids the brief window at sign-in.
+window left returns a Start refused this way to Off, or, in Follow Party and
+Follow Lightshow, which keep their Start across sign-in, tries it again; later
+the refusal stays until the next Start, which sweeps again, or Stop. The
+Windows setting is left as it is; turning it off also avoids the brief window
+at sign-in.
 
 Two limits follow from matching the command line. A relative `--user-data-dir`
 is resolved against the controller's working directory, and only the
@@ -239,9 +269,9 @@ browser window.
 
 To update, run the line again with the new tag and `-Cutover`. Cutover asks the
 running controller to quit, waits until it has let go of its folder, registers
-the new one and starts it. Visuals begin Off, also where Follow Party had a
-Start, so Start them again afterwards. A cutover that fails at its first
-checks changes nothing. One that fails after it has asked the running
+the new one and starts it. Visuals begin Off, also where Follow Party or Follow
+Lightshow had a Start, so Start them again afterwards. A cutover that fails at
+its first checks changes nothing. One that fails after it has asked the running
 controller to quit leaves the controller's task disabled, as it leaves the
 legacy tasks. One that fails once the new controller is registered, usually
 because it did not come up Off within 30 seconds, leaves the new task
@@ -251,6 +281,14 @@ The active configuration is kept. To change it,
 for example to add the Home Assistant keys, edit a copy of
 `%LOCALAPPDATA%\PartyVisuals\controller\config.json` and add
 `-ConfigPath <copy>` to that line.
+
+Releases up to v0.1.5 know neither Follow Lightshow nor its keys. Going back
+to one, select Manual or Follow Party first and pass a `-ConfigPath` copy
+without `lightshowEntity` and `lightshowValue`. Otherwise the older
+controller's `check` refuses the folder, so Stage stops before any task or
+the running controller changes, and an older controller started on it exits
+with `controller did not start: …` (an unknown key) or `controller stopped:
+unsupported controller intent; …` (the mode) and starts no visuals.
 
 ### From a checkout
 

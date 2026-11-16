@@ -2,8 +2,11 @@ package lifecycle
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -31,9 +34,17 @@ type fakeBackend struct {
 	starting chan struct{}
 	stopErr  error
 	deaf     bool // Start waits for gate only: it finishes after its context ended
+	refuse   error
+	calls    int
 }
 
 func (b *fakeBackend) Start(ctx context.Context) (Session, error) {
+	b.mu.Lock()
+	b.calls++
+	b.mu.Unlock()
+	if b.refuse != nil {
+		return nil, b.refuse
+	}
 	if b.starting != nil {
 		select {
 		case b.starting <- struct{}{}:
@@ -81,7 +92,7 @@ func TestOffSurvivesTriggersAndNewOwner(t *testing.T) {
 	m.Apply("start")
 	eventually(t, func() bool { return m.Snapshot().Phase == "running" })
 	m.Apply("stop")
-	for _, c := range []string{"suspend", "resume", "party-on", "follow-party", "restore"} {
+	for _, c := range []string{"suspend", "resume", "party-on", "follow-party", "follow-lightshow", "restore"} {
 		if e := m.Apply(c); e != nil {
 			t.Fatal(e)
 		}
@@ -178,18 +189,25 @@ func TestUnknownBrowserExitPersistsOff(t *testing.T) {
 		t.Fatalf("Off not durable: %+v %v", v, e)
 	}
 }
-func TestFollowPartyRequiresOptInAndExplicitStart(t *testing.T) {
-	b := &fakeBackend{}
-	m, _ := newManager(t, b)
-	m.Apply("follow-party")
-	m.Apply("party-on")
-	eventually(t, func() bool { return m.Snapshot().Phase == "off" })
-	m.Apply("start")
-	eventually(t, func() bool { return m.Snapshot().Phase == "running" })
-	m.Apply("party-off")
-	eventually(t, func() bool { return m.Snapshot().Phase == "waiting-for-party" })
-	m.Apply("party-on")
-	eventually(t, func() bool { return m.Snapshot().Phase == "running" })
+
+var followModes = []string{"follow-party", "follow-lightshow"}
+
+func TestFollowModesRequireOptInAndExplicitStart(t *testing.T) {
+	for _, mode := range followModes {
+		t.Run(mode, func(t *testing.T) {
+			b := &fakeBackend{}
+			m, _ := newManager(t, b)
+			m.Apply(mode)
+			m.Apply("party-on")
+			eventually(t, func() bool { return m.Snapshot().Phase == "off" })
+			m.Apply("start")
+			eventually(t, func() bool { return m.Snapshot().Phase == "running" })
+			m.Apply("party-off")
+			eventually(t, func() bool { return m.Snapshot().Phase == "waiting-for-party" })
+			m.Apply("party-on")
+			eventually(t, func() bool { return m.Snapshot().Phase == "running" })
+		})
+	}
 }
 func TestCorruptStateFailsClosed(t *testing.T) {
 	s := FileStore{filepath.Join(t.TempDir(), "intent.json")}
@@ -216,51 +234,56 @@ func TestLeftoverOnAfterOwnerLossRequiresStart(t *testing.T) {
 		t.Fatal("ambiguous previous owner silently resumed")
 	}
 }
-func TestFollowPartyStartSurvivesANewOwner(t *testing.T) {
-	store := FileStore{Path: filepath.Join(t.TempDir(), "intent.json")}
-	if e := store.Save(Intent{Version: 1, Mode: "follow-party", Requested: true}); e != nil {
-		t.Fatal(e)
+func TestAFollowModesStartSurvivesANewOwner(t *testing.T) {
+	for _, mode := range followModes {
+		t.Run(mode, func(t *testing.T) {
+			store := FileStore{Path: filepath.Join(t.TempDir(), "intent.json")}
+			if e := store.Save(Intent{Version: 1, Mode: mode, Requested: true}); e != nil {
+				t.Fatal(e)
+			}
+			b := &fakeBackend{}
+			m, e := New(store, b, nil)
+			if e != nil {
+				t.Fatal(e)
+			}
+			defer m.Close()
+			m.Apply("restore")
+			eventually(t, func() bool { return m.Snapshot().Phase == "waiting-for-party" })
+			if v, e := store.Load(); e != nil || !v.Requested || v.ManualOff || v.Mode != mode {
+				t.Fatalf("a new owner dropped the Start that %s had: %+v, %v", mode, v, e)
+			}
+			if b.count() != 0 {
+				t.Fatal("visuals started before the source asked")
+			}
+			m.Apply("party-on")
+			eventually(t, func() bool { return m.Snapshot().Phase == "running" })
+		})
 	}
-	b := &fakeBackend{}
-	m, e := New(store, b, nil)
-	if e != nil {
-		t.Fatal(e)
-	}
-	defer m.Close()
-	m.Apply("restore")
-	eventually(t, func() bool { return m.Snapshot().Phase == "waiting-for-party" })
-	if v, e := store.Load(); e != nil || !v.Requested || v.ManualOff {
-		t.Fatalf("a new owner dropped the Start that Follow Party had: %+v, %v", v, e)
-	}
-	b.mu.Lock()
-	started := len(b.sessions)
-	b.mu.Unlock()
-	if started != 0 {
-		t.Fatal("visuals started before the party")
-	}
-	m.Apply("party-on")
-	eventually(t, func() bool { return m.Snapshot().Phase == "running" })
 }
 func TestCloseEndsTheSessionAndKeepsTheIntent(t *testing.T) {
-	b := &fakeBackend{}
-	m, store := newManager(t, b)
-	m.Apply("follow-party")
-	m.Apply("start")
-	m.Apply("party-on")
-	eventually(t, func() bool { return m.Snapshot().Phase == "running" })
-	if e := m.Close(); e != nil {
-		t.Fatal(e)
-	}
-	b.mu.Lock()
-	s := b.sessions[0]
-	b.mu.Unlock()
-	select {
-	case <-s.stopped:
-	default:
-		t.Fatal("Close left the worker running")
-	}
-	if v, e := store.Load(); e != nil || !v.Requested || v.ManualOff {
-		t.Fatalf("Close recorded an Off nobody asked for: %+v, %v", v, e)
+	for _, mode := range followModes {
+		t.Run(mode, func(t *testing.T) {
+			b := &fakeBackend{}
+			m, store := newManager(t, b)
+			m.Apply(mode)
+			m.Apply("start")
+			m.Apply("party-on")
+			eventually(t, func() bool { return m.Snapshot().Phase == "running" })
+			if e := m.Close(); e != nil {
+				t.Fatal(e)
+			}
+			b.mu.Lock()
+			s := b.sessions[0]
+			b.mu.Unlock()
+			select {
+			case <-s.stopped:
+			default:
+				t.Fatal("Close left the worker running")
+			}
+			if v, e := store.Load(); e != nil || !v.Requested || v.ManualOff || v.Mode != mode {
+				t.Fatalf("Close recorded an Off nobody asked for: %+v, %v", v, e)
+			}
+		})
 	}
 }
 func TestAnOffThatCouldNotBeSavedIsSavedLater(t *testing.T) {
@@ -294,17 +317,21 @@ func TestAnOffThatCouldNotBeSavedIsSavedLater(t *testing.T) {
 		})
 	}
 }
-func TestFollowPartyStartsOnceTheRestoredWindowThatRefusedItIsClosed(t *testing.T) {
-	b := &restoringBackend{lateRestore: true}
-	m, store := newManager(t, b)
-	m.Apply("follow-party")
-	m.Apply("start")
-	m.Apply("party-on")
-	eventually(t, func() bool { return m.Snapshot().Reason == ErrRestoredOpen.Error() })
-	m.CloseRestored(context.Background())
-	eventually(t, func() bool { return m.Snapshot().Phase == "running" && b.open() == 0 })
-	if v, e := store.Load(); e != nil || !v.Requested || v.ManualOff {
-		t.Fatalf("the window Windows restored cost Follow Party its Start: %+v, %v", v, e)
+func TestAFollowModeStartsOnceTheRestoredWindowThatRefusedItIsClosed(t *testing.T) {
+	for _, mode := range followModes {
+		t.Run(mode, func(t *testing.T) {
+			b := &restoringBackend{lateRestore: true}
+			m, store := newManager(t, b)
+			m.Apply(mode)
+			m.Apply("start")
+			m.Apply("party-on")
+			eventually(t, func() bool { return m.Snapshot().Reason == ErrRestoredOpen.Error() })
+			m.CloseRestored(context.Background())
+			eventually(t, func() bool { return m.Snapshot().Phase == "running" && b.open() == 0 })
+			if v, e := store.Load(); e != nil || !v.Requested || v.ManualOff {
+				t.Fatalf("the window Windows restored cost %s its Start: %+v, %v", mode, v, e)
+			}
+		})
 	}
 }
 func TestPartyEventsDoNotRestartManualSession(t *testing.T) {
@@ -445,8 +472,8 @@ func TestCloseNamesAnUnsavedOffAndAWorkerThatDidNotStopOnOneLine(t *testing.T) {
 	}
 }
 
-func TestAQuitIsRefusedOverAnUnsavedOffOnlyInFollowParty(t *testing.T) {
-	for mode, refused := range map[string]bool{"manual": false, "follow-party": true} {
+func TestAQuitIsRefusedOverAnUnsavedOffOnlyInAFollowMode(t *testing.T) {
+	for mode, refused := range map[string]bool{"manual": false, "follow-party": true, "follow-lightshow": true} {
 		t.Run(mode, func(t *testing.T) {
 			store := &failingStore{FileStore: FileStore{Path: filepath.Join(t.TempDir(), "intent.json")}}
 			b := &fakeBackend{}
@@ -497,7 +524,7 @@ func TestStaleSessionCompletionCannotStopNewStart(t *testing.T) {
 	m.Apply("start")
 	eventually(t, func() bool { return m.Snapshot().Phase == "running" && m.Snapshot().Generation != oldGeneration })
 	before := m.Snapshot()
-	if e := m.apply("stop", "late old completion", oldGeneration); e != nil {
+	if e := m.apply("stop", "late old completion", oldGeneration, ""); e != nil {
 		t.Fatal(e)
 	}
 	after := m.Snapshot()
@@ -755,8 +782,8 @@ func TestStopWhileOffPublishesAndSweepsNothing(t *testing.T) {
 		t.Fatal(e)
 	}
 	m.Apply("restore")
-	// Restore publishes stopping and off, in either order.
-	eventually(t, func() bool { return len(l.get()) == 2 && m.Snapshot().Phase == "off" })
+	// Restore publishes stopping, then off; an off that overtook stopping drops it.
+	eventually(t, func() bool { p := l.get(); return len(p) > 0 && p[len(p)-1] == "off" && m.Snapshot().Phase == "off" })
 	before, generation := l.get(), m.Snapshot().Generation
 	b.restore()
 	for i := 0; i < 3; i++ {
@@ -864,5 +891,325 @@ func TestASweepWhoseContextEndedLooksForNothing(t *testing.T) {
 	m.CloseRestored(ended)
 	if b.swept() != 0 || b.open() != 1 {
 		t.Fatalf("%d sweeps, %d windows open", b.swept(), b.open())
+	}
+}
+
+// following runs mode with a Start and the source's party-on until visuals run.
+func following(t *testing.T, b Backend, mode string) (*Manager, FileStore) {
+	t.Helper()
+	m, store := newManager(t, b)
+	m.Apply(mode)
+	m.Apply("start")
+	m.Apply("party-on")
+	return m, store
+}
+
+func TestASwitchBetweenTheFollowModesLeavesARunningSessionToTheNewSource(t *testing.T) {
+	for i, from := range followModes {
+		to := followModes[1-i]
+		t.Run(from, func(t *testing.T) {
+			b := &fakeBackend{}
+			m, store := following(t, b, from)
+			eventually(t, func() bool { return m.Snapshot().Phase == "running" })
+			if e := m.Apply(to); e != nil {
+				t.Fatal(e)
+			}
+			if s := settled(t, m); s.Phase != "running" || s.Intent.Mode != to || b.count() != 1 {
+				t.Fatalf("the switch to %s left %+v with %d sessions", to, s, b.count())
+			}
+			select {
+			case <-b.sessions[0].stopped:
+				t.Fatal("the switch stopped visuals no source asked to stop")
+			default:
+			}
+			if v, e := store.Load(); e != nil || v.Mode != to || !v.Requested {
+				t.Fatalf("the store holds %+v, %v", v, e)
+			}
+			if e := m.Event(to, "party-off"); e != nil {
+				t.Fatal(e)
+			}
+			if s := settled(t, m); s.Phase != "waiting-for-party" {
+				t.Fatalf("the new source's party-off left %q", s.Phase)
+			}
+		})
+	}
+}
+
+func TestASwitchBetweenTheFollowModesDoesNotRestartAStartInProgress(t *testing.T) {
+	b := &fakeBackend{gate: make(chan struct{}), starting: make(chan struct{}, 1)}
+	m, _ := following(t, b, "follow-party")
+	<-b.starting
+	m.Apply("follow-lightshow")
+	close(b.gate)
+	eventually(t, func() bool { return m.Snapshot().Phase == "running" })
+	if calls := func() int { b.mu.Lock(); defer b.mu.Unlock(); return b.calls }(); calls != 1 || b.count() != 1 {
+		t.Fatalf("the switch restarted the start: %d starts, %d sessions", calls, b.count())
+	}
+}
+
+func TestAfterASwitchNothingStartsBeforeTheNewSourceSaysSo(t *testing.T) {
+	for name, before := range map[string]func(*Manager){
+		"Off, then Start":       func(m *Manager) { m.Apply("stop") },
+		"suspended, then wake":  func(m *Manager) { m.Apply("suspend") },
+		"a refused Start stays": func(*Manager) {},
+	} {
+		t.Run(name, func(t *testing.T) {
+			b := &fakeBackend{refuse: errors.New("NodeCG port is already in use outside this controller")}
+			m, _ := following(t, b, "follow-party")
+			eventually(t, func() bool { return m.Snapshot().Phase == "attention" })
+			before(m)
+			settled(t, m)
+			b.mu.Lock()
+			b.refuse, b.calls = nil, 0
+			b.mu.Unlock()
+			m.Apply("follow-lightshow")
+			m.Apply("start")
+			m.Apply("resume")
+			m.CloseRestored(context.Background())
+			if s := settled(t, m); s.Phase == "running" || b.count() != 0 {
+				t.Fatalf("visuals started on Follow Party's reading after the switch: %+v, %d sessions", s, b.count())
+			}
+			m.Event("follow-lightshow", "party-on")
+			eventually(t, func() bool { return m.Snapshot().Phase == "running" })
+		})
+	}
+}
+
+func TestASourceEventCountsOnlyWhileItsModeIsSelected(t *testing.T) {
+	b := &fakeBackend{}
+	m, _ := newManager(t, b)
+	m.Apply("follow-lightshow")
+	m.Apply("start")
+	settled(t, m)
+	for _, mode := range []string{"follow-party", "manual"} {
+		if e := m.Event(mode, "party-on"); e == nil {
+			t.Fatalf("a reading for %s was taken in Follow Lightshow", mode)
+		}
+	}
+	if s := settled(t, m); s.Phase != "waiting-for-party" || s.Party || b.count() != 0 {
+		t.Fatalf("a late reading of the other source changed %+v", s)
+	}
+	for _, c := range []string{"start", "stop", "follow-party"} {
+		if e := m.Event("follow-lightshow", c); e == nil {
+			t.Fatalf("a source sent %q", c)
+		}
+	}
+	if e := m.Event("follow-lightshow", "party-on"); e != nil {
+		t.Fatal(e)
+	}
+	eventually(t, func() bool { return m.Snapshot().Phase == "running" })
+}
+
+func TestTheStoreTakesTheThreeModesOnly(t *testing.T) {
+	s := FileStore{filepath.Join(t.TempDir(), "intent.json")}
+	for _, mode := range []string{"manual", "follow-party", "follow-lightshow"} {
+		if e := s.Save(Intent{Version: 1, Mode: mode, ManualOff: true}); e != nil {
+			t.Fatal(e)
+		}
+		if v, e := s.Load(); e != nil || v.Mode != mode {
+			t.Fatalf("%s: %+v, %v", mode, v, e)
+		}
+	}
+	AtomicWrite(s.Path, []byte(`{"version":1,"mode":"follow-something","requested":true}`))
+	if _, e := New(s, &fakeBackend{}, nil); e == nil {
+		t.Fatal("an unknown mode was accepted")
+	}
+}
+
+// v015Starts is how release v0.1.5 reads intent.json (lifecycle.FileStore.Load
+// and New at tag v0.1.5): whether it would run the stored Start.
+func v015Starts(b []byte) (starts bool, refused bool) {
+	var v struct {
+		Version   int    `json:"version"`
+		Mode      string `json:"mode"`
+		ManualOff bool   `json:"manualOff"`
+		Requested bool   `json:"requested"`
+	}
+	if json.Unmarshal(b, &v) != nil || v.Version != 1 || (v.Mode != "manual" && v.Mode != "follow-party") {
+		return false, true
+	}
+	return v.Requested && v.Mode == "follow-party", false
+}
+
+func TestAnIntentInFollowLightshowIsRefusedByAnEarlierRelease(t *testing.T) {
+	store := FileStore{filepath.Join(t.TempDir(), "intent.json")}
+	m, e := New(store, &fakeBackend{}, nil)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer m.Close()
+	for _, c := range []string{"follow-lightshow", "start", "party-on", "stop", "start"} {
+		m.Apply(c)
+		b, e := os.ReadFile(store.Path)
+		if e != nil {
+			t.Fatal(e)
+		}
+		if starts, refused := v015Starts(b); starts || !refused {
+			t.Fatalf("after %q v0.1.5 would read %s as starts=%v refused=%v", c, b, starts, refused)
+		}
+	}
+}
+
+func TestAfterASwitchTheSignInSweepDoesNotRetryTheOtherSourcesStart(t *testing.T) {
+	b := &restoringBackend{lateRestore: true}
+	m, _ := following(t, b, "follow-party")
+	eventually(t, func() bool { return m.Snapshot().Reason == ErrRestoredOpen.Error() })
+	m.Apply("follow-lightshow")
+	settled(t, m)
+	m.CloseRestored(context.Background())
+	if s := settled(t, m); s.Phase != "waiting-for-party" || b.count() != 0 {
+		t.Fatalf("the sweep retried Follow Party's Start in Follow Lightshow: %+v, %d sessions", s, b.count())
+	}
+	m.Event("follow-lightshow", "party-on")
+	eventually(t, func() bool { return m.Snapshot().Phase == "running" })
+}
+
+func TestAReadingDoesNotCarryThroughManualIntoTheOtherFollowMode(t *testing.T) {
+	for name, before := range map[string]func(*Manager){
+		"Off, then Start":      func(m *Manager) { m.Apply("stop") },
+		"suspended, then wake": func(m *Manager) { m.Apply("suspend") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			b := &fakeBackend{}
+			m, _ := newManager(t, b)
+			m.Apply("follow-party")
+			m.Apply("start")
+			if e := m.Event("follow-party", "party-on"); e != nil {
+				t.Fatal(e)
+			}
+			eventually(t, func() bool { return m.Snapshot().Phase == "running" })
+			before(m)
+			settled(t, m)
+			m.Apply("manual")
+			m.Apply("follow-lightshow")
+			m.Apply("start")
+			m.Apply("resume")
+			if s := settled(t, m); s.Phase == "running" || s.Party || b.count() != 1 {
+				t.Fatalf("visuals started on Follow Party's reading after Manual: %+v, %d sessions", s, b.count())
+			}
+			m.Event("follow-lightshow", "party-on")
+			eventually(t, func() bool { return m.Snapshot().Phase == "running" })
+		})
+	}
+}
+
+func TestTheLastStateHandedOutIsTheNewest(t *testing.T) {
+	var mu sync.Mutex
+	var modes []string
+	release := make(chan struct{})
+	b := &fakeBackend{gate: make(chan struct{})}
+	m, e := New(FileStore{filepath.Join(t.TempDir(), "intent.json")}, b, func(s Status) {
+		if s.Phase == "running" && s.Intent.Mode == "follow-party" {
+			<-release
+		}
+		mu.Lock()
+		modes = append(modes, s.Intent.Mode)
+		mu.Unlock()
+	})
+	if e != nil {
+		t.Fatal(e)
+	}
+	t.Cleanup(func() { m.Close() })
+	m.Apply("follow-party")
+	m.Apply("start")
+	m.Event("follow-party", "party-on")
+	// The start finishes only now, so its running state cannot hold the callback before Event's own state got through.
+	close(b.gate)
+	eventually(t, func() bool { return m.Snapshot().Phase == "running" })
+	switched := make(chan struct{})
+	go func() { m.Apply("follow-lightshow"); close(switched) }()
+	eventually(t, func() bool { return m.Snapshot().Intent.Mode == "follow-lightshow" })
+	time.Sleep(20 * time.Millisecond)
+	close(release)
+	<-switched
+	m.mu.Lock()
+	m.seq++
+	stale, seq := m.state, m.seq
+	m.mu.Unlock()
+	stale.Intent.Mode = "follow-party"
+	m.Apply("follow-party")
+	m.Apply("follow-lightshow")
+	m.notify(stale, seq)
+	mu.Lock()
+	defer mu.Unlock()
+	if last := modes[len(modes)-1]; last != "follow-lightshow" {
+		t.Fatalf("the last state handed out was in %s, the manager is in follow-lightshow: %v", last, modes)
+	}
+	if !slices.Equal(modes[len(modes)-4:], []string{"follow-party", "follow-lightshow", "follow-party", "follow-lightshow"}) {
+		t.Fatalf("states out of order: %v", modes)
+	}
+}
+
+func TestAReadingKeptForARunningSessionStartsNothingOnceThatSessionEnded(t *testing.T) {
+	for name, after := range map[string]func(*Manager, *fakeBackend){
+		"Stop, then Start": func(m *Manager, _ *fakeBackend) { m.Apply("stop"); settled(t, m); m.Apply("start") },
+		"sleep, then wake": func(m *Manager, _ *fakeBackend) { m.Apply("suspend"); settled(t, m); m.Apply("resume") },
+		"window closed, Start": func(m *Manager, b *fakeBackend) {
+			b.sessions[0].end(nil)
+			eventually(t, func() bool { return m.Snapshot().Phase != "running" })
+			settled(t, m)
+			m.Apply("start")
+		},
+		"Manual, Stop, then Start": func(m *Manager, _ *fakeBackend) {
+			m.Apply("manual")
+			m.Apply("follow-lightshow")
+			m.Apply("stop")
+			settled(t, m)
+			m.Apply("start")
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			b := &fakeBackend{}
+			m, _ := newManager(t, b)
+			m.Apply("follow-party")
+			m.Apply("start")
+			m.Event("follow-party", "party-on")
+			eventually(t, func() bool { return m.Snapshot().Phase == "running" })
+			m.Apply("follow-lightshow")
+			if s := settled(t, m); s.Phase != "running" || b.count() != 1 {
+				t.Fatalf("the switch did not keep the running session: %+v", s)
+			}
+			after(m, b)
+			if s := settled(t, m); s.Phase == "running" || b.count() != 1 {
+				t.Fatalf("visuals started again on Follow Party's reading: %+v, %d sessions", s, b.count())
+			}
+			m.Event("follow-lightshow", "party-on")
+			eventually(t, func() bool { return m.Snapshot().Phase == "running" })
+		})
+	}
+}
+
+func TestTheSignInSweepDoesNotRetryAStartTheOtherSourceBeganBeforeTheSwitch(t *testing.T) {
+	b := &restoringBackend{lateRestore: true}
+	m, _ := newManager(t, b)
+	m.Apply("follow-party")
+	m.Apply("start")
+	b.sweep.Lock()
+	m.Event("follow-party", "party-on")
+	if p := m.Snapshot().Phase; p != "starting" {
+		b.sweep.Unlock()
+		t.Fatalf("phase %s", p)
+	}
+	m.Apply("follow-lightshow")
+	b.sweep.Unlock()
+	eventually(t, func() bool { return m.Snapshot().Reason == ErrRestoredOpen.Error() })
+	m.CloseRestored(context.Background())
+	if s := settled(t, m); s.Phase == "running" || b.count() != 0 {
+		t.Fatalf("the sweep retried Follow Party's Start in Follow Lightshow: %+v, %d sessions", s, b.count())
+	}
+	m.Event("follow-lightshow", "party-on")
+	eventually(t, func() bool { return m.Snapshot().Phase == "running" })
+}
+
+func TestWhoSetThePartyStateCountsOnlyWhenItChangesWhetherVisualsAreWanted(t *testing.T) {
+	b := &fakeBackend{}
+	m, _ := newManager(t, b)
+	m.Apply("follow-party")
+	m.Apply("start")
+	before := settled(t, m)
+	m.Event("follow-party", "party-off")
+	m.Apply("party-off")
+	if s := settled(t, m); s.Generation != before.Generation || s.Phase != "waiting-for-party" || b.count() != 0 {
+		t.Fatalf("an unchanged party-off cycled the worker: %+v -> %+v", before, s)
 	}
 }
