@@ -100,6 +100,7 @@ func (m *Manager) Snapshot() Status { m.mu.Lock(); defer m.mu.Unlock(); return m
 
 // notify hands changed the state numbered seq, in order: a state that a newer
 // one overtook on its way here is dropped, so changed ends on the newest state.
+// changed must not wait for a caller of Apply or Event: they wait for it.
 func (m *Manager) notify(s Status, seq uint64) {
 	if m.changed == nil {
 		return
@@ -199,7 +200,7 @@ func (m *Manager) apply(command, reason string, expectedGeneration uint64, forMo
 		}
 	}
 	next.Reason = reason
-	if next == m.state && m.partyBy == by && command != "restore" && !(command == "start" && m.state.Phase == "attention") {
+	if next == m.state && (m.partyBy == by || m.wants(next) == previousWant) && command != "restore" && !(command == "start" && m.state.Phase == "attention") {
 		m.mu.Unlock()
 		return persistenceError
 	}

@@ -1097,7 +1097,8 @@ func TestTheLastStateHandedOutIsTheNewest(t *testing.T) {
 	var mu sync.Mutex
 	var modes []string
 	release := make(chan struct{})
-	m, e := New(FileStore{filepath.Join(t.TempDir(), "intent.json")}, &fakeBackend{}, func(s Status) {
+	b := &fakeBackend{gate: make(chan struct{})}
+	m, e := New(FileStore{filepath.Join(t.TempDir(), "intent.json")}, b, func(s Status) {
 		if s.Phase == "running" && s.Intent.Mode == "follow-party" {
 			<-release
 		}
@@ -1112,6 +1113,8 @@ func TestTheLastStateHandedOutIsTheNewest(t *testing.T) {
 	m.Apply("follow-party")
 	m.Apply("start")
 	m.Event("follow-party", "party-on")
+	// The start finishes only now, so its running state cannot hold the callback before Event's own state got through.
+	close(b.gate)
 	eventually(t, func() bool { return m.Snapshot().Phase == "running" })
 	switched := make(chan struct{})
 	go func() { m.Apply("follow-lightshow"); close(switched) }()
@@ -1196,4 +1199,17 @@ func TestTheSignInSweepDoesNotRetryAStartTheOtherSourceBeganBeforeTheSwitch(t *t
 	}
 	m.Event("follow-lightshow", "party-on")
 	eventually(t, func() bool { return m.Snapshot().Phase == "running" })
+}
+
+func TestWhoSetThePartyStateCountsOnlyWhenItChangesWhetherVisualsAreWanted(t *testing.T) {
+	b := &fakeBackend{}
+	m, _ := newManager(t, b)
+	m.Apply("follow-party")
+	m.Apply("start")
+	before := settled(t, m)
+	m.Event("follow-party", "party-off")
+	m.Apply("party-off")
+	if s := settled(t, m); s.Generation != before.Generation || s.Phase != "waiting-for-party" || b.count() != 0 {
+		t.Fatalf("an unchanged party-off cycled the worker: %+v -> %+v", before, s)
+	}
 }
