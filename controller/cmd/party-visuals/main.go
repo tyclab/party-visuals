@@ -252,14 +252,7 @@ func serve(root string, c worker.Config, logger *controllerLog) error {
 			return m.Apply(command)
 		}
 	}
-	trayCommand := logger.command("tray", command)
-	t, e = tray.New(icon(), tray.Options{Name: "Party Visuals", Identifier: "io.tyclab.partyvisuals.controller", Tooltip: "Party Visuals", OnClick: func(c string) {
-		go func() {
-			if e := trayCommand(c); e != nil {
-				t.Notify("Party Visuals", e.Error())
-			}
-		}()
-	}, OnSystemEvent: func(event string) {
+	systemEvent := func(event string) {
 		if event == "display-change" && m.Snapshot().Suspended {
 			return
 		}
@@ -284,7 +277,15 @@ func serve(root string, c worker.Config, logger *controllerLog) error {
 				}
 			}()
 		}
-	}})
+	}
+	trayCommand := logger.command("tray", command)
+	t, e = tray.New(icon(), tray.Options{Name: "Party Visuals", Identifier: "io.tyclab.partyvisuals.controller", Tooltip: "Party Visuals", OnClick: func(c string) {
+		go func() {
+			if e := trayCommand(c); e != nil {
+				t.Notify("Party Visuals", e.Error())
+			}
+		}()
+	}, OnSystemEvent: systemEvent})
 	if e != nil {
 		return e
 	}
@@ -293,7 +294,13 @@ func serve(root string, c worker.Config, logger *controllerLog) error {
 			t.Notify("Party Visuals", text)
 		}
 	}
-	m, _, e = startManager(ctx, root, &worker.Backend{Config: c, ConfigPath: filepath.Join(root, "config.json"), Notice: notice}, func(s lifecycle.Status) {
+	var backend *worker.Backend
+	var power *partysource.Power
+	if c.DisplayPowerEntity != "" && source != nil {
+		power = partysource.NewPower(source, c.DisplayPowerEntity, logger.Printf, reopenOnPower(c.DisplayPowerEntity, func() string { return m.Snapshot().Phase }, func() worker.Placement { return backend.Placement() }, func() string { return power.Reading() }, logger.Printf, systemEvent))
+	}
+	backend = &worker.Backend{Config: c, ConfigPath: filepath.Join(root, "config.json"), Notice: notice, Power: power.Reading, Placed: func(p worker.Placement) { logger.Printf("visuals open on %s", p.Text) }}
+	m, _, e = startManager(ctx, root, backend, func(s lifecycle.Status) {
 		logger.state(s)
 		source.Follow(s.Intent.Mode)
 		refresh(s)
@@ -312,12 +319,21 @@ func serve(root string, c worker.Config, logger *controllerLog) error {
 		source.Follow(m.Snapshot().Intent.Mode)
 		go source.Run(ctx)
 	}
+	if power != nil {
+		go power.Run(ctx)
+	}
 	go func() {
 		tick := time.NewTicker(3 * time.Second)
 		defer tick.Stop()
 		for {
 			d := worker.Diagnose(ctx, c)
 			d.Browser = logger.browserNote()
+			if m.Snapshot().Phase == "running" {
+				d.Display = backend.Placement().Text
+			}
+			if power != nil {
+				d.DisplayPower = power.Status().Summary
+			}
 			diagMu.Lock()
 			diag = d
 			diagMu.Unlock()
@@ -383,6 +399,18 @@ func startManager(ctx context.Context, root string, backend lifecycle.Backend, c
 	return m, ended, nil
 }
 
+// reopenOnPower returns what runs after each display power reading: running
+// visuals the settled reading would put on another screen reopen, by the same
+// path as a display change.
+func reopenOnPower(entity string, phase func() string, placement func() worker.Placement, reading func() string, logf func(string, ...any), event func(string)) func() {
+	return func() {
+		if now := reading(); phase() == "running" && placement().Stale(now) {
+			logf("Display power: %s settled at %s; reopening the visuals", entity, now)
+			event("display-change")
+		}
+	}
+}
+
 // followSource is the one Home Assistant poller of both follow modes; nil
 // without homeAssistantUrl, and Follow Lightshow only with lightshowEntity.
 func followSource(c worker.Config, event func(mode, command string) error, logf func(string, ...any)) *partysource.Source {
@@ -406,6 +434,12 @@ func trayItems(s lifecycle.Status, lines []string) []tray.Item {
 
 func diagnosticLines(d worker.Diagnostics, party, lightshow partysource.Status) []string {
 	lines := []string{"Screen: " + d.Screen, "Audio: " + d.Audio, "OpenRGB: " + d.OpenRGB, "Follow Party: " + party.Summary, "Follow Lightshow: " + lightshow.Summary}
+	if d.Display != "" {
+		lines = append(lines, "Display: "+d.Display)
+	}
+	if d.DisplayPower != "" {
+		lines = append(lines, "Display power: "+d.DisplayPower)
+	}
 	if d.Browser != "" {
 		lines = append(lines, "Browser: "+d.Browser)
 	}

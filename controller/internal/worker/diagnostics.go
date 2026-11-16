@@ -12,15 +12,17 @@ import (
 )
 
 type Diagnostics struct {
-	Screen     string    `json:"screen"`
-	Capture    string    `json:"capture"`
-	Audio      string    `json:"audio"`
-	NodeCG     string    `json:"nodecg"`
-	OpenRGB    string    `json:"openrgb"`
-	RGBDevices uint32    `json:"rgbDevices,omitempty"`
-	Outputs    []Output  `json:"outputs,omitempty"`
-	Browser    string    `json:"browser,omitempty"`
-	Time       time.Time `json:"time"`
+	Screen       string    `json:"screen"`
+	Capture      string    `json:"capture"`
+	Audio        string    `json:"audio"`
+	NodeCG       string    `json:"nodecg"`
+	OpenRGB      string    `json:"openrgb"`
+	RGBDevices   uint32    `json:"rgbDevices,omitempty"`
+	Outputs      []Output  `json:"outputs,omitempty"`
+	Browser      string    `json:"browser,omitempty"`
+	Display      string    `json:"display,omitempty"`
+	DisplayPower string    `json:"displayPower,omitempty"`
+	Time         time.Time `json:"time"`
 }
 type Output struct {
 	Name      string `json:"name"`

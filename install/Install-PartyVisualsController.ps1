@@ -85,6 +85,8 @@ function Get-LegacyConfiguration {
     if (-not (Test-Path -LiteralPath $browserFile) -or -not (Test-Path -LiteralPath $nodeFile)) { throw 'Legacy launchers not found; supply a reviewed -ConfigPath.' }
     . $nodeFile
     $savedNodeRoot = $NodecgRoot
+    # A launcher older than -PreferredDisplay leaves it unset.
+    $PreferredDisplay = ''
     . $browserFile
     Initialize-BrowserNative
     $nodeTask = Get-ScheduledTask -TaskName 'PartyVisuals NodeCG' -ErrorAction Stop
@@ -94,7 +96,7 @@ function Get-LegacyConfiguration {
     $task = Get-ScheduledTask -TaskName 'PartyVisuals Browser' -ErrorAction Stop
     Assert-OwnedTask $task $browserFile
     $args = [PartyBrowserNative]::Arguments('powershell.exe ' + $task.Actions[0].Arguments)
-    $allowed = @('ChromeExe','NodeExe','BrowserProfile','HelperPath','VisualizerUrl','ControlsUrl','TelemetryFile','NodecgConfig','Fixture','Fps','Panels','Curtain','Room')
+    $allowed = @('ChromeExe','NodeExe','BrowserProfile','HelperPath','VisualizerUrl','ControlsUrl','TelemetryFile','NodecgConfig','Fixture','Fps','Panels','Curtain','Room','PreferredDisplay')
     for ($i = 1; $i -lt $args.Count; $i++) {
         $name = $args[$i].TrimStart('-')
         if ($name -notin $allowed) { continue }
@@ -103,7 +105,7 @@ function Get-LegacyConfiguration {
             $i++; Set-Variable $name $args[$i]
         }
     }
-    @{
+    $config = @{
         version = 1; workerScript = ''; nodeExe = $NodeExe; chromeExe = $ChromeExe
         nodecgRoot = $savedNodeRoot; browserProfile = $BrowserProfile; helperPath = $HelperPath
         visualizerUrl = $VisualizerUrl; controlsUrl = $ControlsUrl; nodecgConfig = $NodecgConfig
@@ -111,6 +113,9 @@ function Get-LegacyConfiguration {
         logFile = (Join-Path $Root 'logs\nodecg.log'); curtain = [bool]$Curtain; room = [bool]$Room
         panels = [string]$Panels; fixture = [int]$Fixture; fps = [int]$Fps
     }
+    # Only when set: releases up to v0.1.5 refuse the key.
+    if ($PreferredDisplay) { $config.preferredDisplay = [string]$PreferredDisplay }
+    $config
 }
 function Test-ControllerBinary([string] $Exe, [string] $CheckRoot = $StateRoot) {
     & $Exe --root $CheckRoot check

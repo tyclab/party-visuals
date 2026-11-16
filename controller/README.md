@@ -58,7 +58,8 @@ accepts loopback calls only, so the controller pulls: while Follow Party is
 selected it reads one entity (`GET /api/states/<entity>` with a bearer token)
 every `partyPollMs` and sends `party on` when the state equals `partyValue`,
 `party off` for any other state. It sends once per change, and once for the
-first reading after each switch to Follow Party. Manual mode polls nothing.
+first reading after each switch to Follow Party. Manual mode polls no follow
+entity (only `displayPowerEntity`, if set; see [Choosing the screen](#choosing-the-screen)).
 A reading is taken only while the mode it was read for is still selected, so
 one that arrives just after a switch changes nothing.
 A failed reading (error, timeout, `unavailable`, `unknown`) keeps the last
@@ -80,12 +81,12 @@ restart, and `party on|off` sets its state by hand until the entity changes.
 
 One poller serves both follow modes and reads only the selected mode's
 entity, so switching leaves no other entity polled, and a rejected token stops
-polling for both. A switch between Follow Party and Follow Lightshow starts
+polling for both, and the display power reading too. A switch between Follow Party and Follow Lightshow starts
 and stops nothing by itself: visuals that run or are starting carry on until
 the new mode's first reading, which is applied whatever it says, and
 otherwise nothing starts before that reading asks for it. Visuals carried on
-this way that then stop, by Stop, sleep or a closed window, start again only
-on the new mode's reading. The same holds when the switch goes by way of
+this way that then stop, by Stop, sleep, a closed window or a reopen on
+another screen, start again only on the new mode's reading. The same holds when the switch goes by way of
 Manual: a reading one follow mode took does not start visuals in the other. Switching to Manual mode and back to the same
 follow mode works as for Follow Party.
 
@@ -136,6 +137,63 @@ exists the capture helper preserves normal MA artwork/text. The live-audio page 
 calm and names what it waits for on screen and in the helper's status file
 (`display.wait`, beside `display.ageMs`). The helper's `--status-file` support is
 required before a session can run.
+
+## Choosing the screen
+
+Without `preferredDisplay` Chrome opens the visuals where they were last closed. With
+it, the worker chooses the screen at each open, whether by Start, by a follow mode or by
+a reopen, and hands Chrome that screen's position and size, which override the place
+Chrome saved in the profile. The visuals open fullscreen on:
+
+1. the preferred display, while Windows lists it and it does not read off;
+2. otherwise the leftmost screen that is not the primary, the upper one of two with the
+   same left edge, never a preferred display that reads off;
+3. otherwise the primary screen.
+
+```json
+"preferredDisplay": "<monitor name>",
+"displayPowerEntity": "media_player.<tv>"
+```
+
+`preferredDisplay` is the monitor's name as Windows shows it in Settings > System >
+Display > Advanced display, which comes from the monitor itself (a TV's model name,
+for example), matched whole and in any letter case. A screen that mirrors another
+counts when either monitor has the name; of two screens with the name, the one that
+is not the primary, then the leftmost, is taken. `check` and Stage refuse a name with
+surrounding spaces, control characters or more than 64 characters.
+
+Windows can keep listing a TV while it is off or in standby, so its list alone cannot
+say "on". `displayPowerEntity`, optional, names a Home Assistant entity that can: `off`
+and `standby` read as off, any other state as on. It takes `homeAssistantUrl` and
+`homeAssistantTokenFile` from Follow Party with their checks and rules: an empty token
+file sends nothing, and a 401/403 answer stops this reading and the follow modes'
+until the controller restarts: requests go one at a time, so Home Assistant sees the
+rejected token once. The controller reads it every `partyPollMs` while it runs, in
+every mode.
+The first reading counts at once; a change counts once it has held for 30 seconds,
+since such an entity can read off for a few seconds while the TV stays on. A failed
+reading keeps the last one. Until the first reading, and after a refused token, the
+choice goes by Windows' list alone, as it does without the entity.
+
+When the choice changes while visuals run, they reopen on the new screen. Windows
+adding or removing a screen already restarts the visuals, as every display change
+does; an on/off change of the power reading while Windows lists the preferred display
+restarts them the same way. A window moved by hand stays where it is until the next
+open, where the rule applies again; to keep the visuals where you put them, leave
+`preferredDisplay` out.
+
+Chrome takes the position and size in device-independent pixels. With one scale
+factor on every screen (Settings > System > Display > Scale) the worker divides each
+screen's pixels by that factor, which is exact. With different scale factors Chrome
+arranges the screens outward from the primary in a way the worker does not reproduce,
+so the worker hands Chrome no position, Chrome opens the visuals where they were last
+closed, and the log says why.
+
+`controller.log` records each open, such as `visuals open on \\.\DISPLAY2 (<monitor>,
+3840x1600 at 3840,0): the preferred display is off; first screen other than the
+primary`, and each change of the power reading. While visuals run, the tray and
+`diagnostics` show the choice as `Display: …`, and with an entity its state as
+`Display power: …`; `status --json` holds both under `diagnostics`.
 
 ## Keeping the controller running
 
@@ -282,9 +340,10 @@ for example to add the Home Assistant keys, edit a copy of
 `%LOCALAPPDATA%\PartyVisuals\controller\config.json` and add
 `-ConfigPath <copy>` to that line.
 
-Releases up to v0.1.5 know neither Follow Lightshow nor its keys. Going back
-to one, select Manual or Follow Party first and pass a `-ConfigPath` copy
-without `lightshowEntity` and `lightshowValue`. Otherwise the older
+Releases up to v0.1.5 know neither Follow Lightshow nor its keys, nor
+`preferredDisplay` and `displayPowerEntity`. Going back to one, select Manual
+or Follow Party first and pass a `-ConfigPath` copy without `lightshowEntity`,
+`lightshowValue`, `preferredDisplay` and `displayPowerEntity`. Otherwise the older
 controller's `check` refuses the folder, so Stage stops before any task or
 the running controller changes, and an older controller started on it exits
 with `controller did not start: …` (an unknown key) or `controller stopped:
@@ -363,7 +422,11 @@ actual file locks, Job Objects and the PowerShell worker with isolated dummy
 children, plus installer rollback tests. It does not send physical outputs.
 
 Real Chrome GPU recovery, actual sleep/wake and audible source acceptance still
-need controlled deployment checks. Dummy children cannot prove those. The same
+need controlled deployment checks. Where Chrome puts the visuals is checked on the
+show PC with `test\display-target.acceptance.ps1`: it opens Chrome on a throwaway
+profile on each screen with the worker's arguments, reads the window back through the
+DevTools protocol and from Windows, and prints PASS, FAIL or SKIP per screen. It
+opens visible windows, so it is not part of CI. Dummy children cannot prove those. The same
 holds for a real sign-in restore: CI's dummy `chrome.exe` children only show
 that a dedicated-profile process carrying `--restore-last-session` is closed
 through its window or ended, that other profiles are left running, and that the

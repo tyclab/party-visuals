@@ -31,6 +31,72 @@ Check 'dedicated visualizer keeps rendering and capture timers when unfocused' (
 Check 'Chrome retains dedicated profile and normal auth storage' ($browserArgs -contains ('--user-data-dir=' + $BrowserProfile) -and -not ($browserArgs -match 'incognito|guest|disable-web-security'))
 Check 'Chrome opens the visualizer app fullscreen' ($browserArgs -contains '--start-fullscreen' -and $browserArgs -contains ('--app=' + $VisualizerUrl))
 Check 'no window geometry, so Chrome keeps the screen the operator chose' (-not ($browserArgs -match '^--window-(position|size)='))
+
+function New-Screen([string] $Device, [string[]] $Monitors, [int] $X, [int] $Y, [int] $Width, [int] $Height, [bool] $Primary = $false, [int] $Dpi = 96) {
+    [pscustomobject]@{ Device = $Device; Monitors = $Monitors; X = $X; Y = $Y; Width = $Width; Height = $Height; Primary = $Primary; Dpi = $Dpi }
+}
+$deskLeft = New-Screen '\\.\DISPLAY1' @('Desk Monitor') 0 0 3840 1600 $true
+$deskRight = New-Screen '\\.\DISPLAY2' @('Desk Monitor') 3840 0 3840 1600
+$tv = New-Screen '\\.\DISPLAY3' @('Big TV') 1920 -2160 3840 2160
+$layout = @($deskLeft, $deskRight, $tv)
+$pick = Select-VisualsScreen $layout 'Big TV' 'on'
+Check 'the preferred display opens the visuals when it is connected and on' ($pick.Screen.Device -eq '\\.\DISPLAY3' -and $pick.PreferredListed -and $pick.Reason -eq 'the preferred display is connected and on')
+$pick = Select-VisualsScreen $layout 'Big TV' 'none'
+Check 'without a power entity a connected preferred display counts as on' ($pick.Screen.Device -eq '\\.\DISPLAY3' -and $pick.Reason -eq 'the preferred display is connected')
+$pick = Select-VisualsScreen $layout 'Big TV' 'unknown'
+Check 'an unknown power reading leaves the choice to the display list' ($pick.Screen.Device -eq '\\.\DISPLAY3' -and $pick.Reason -eq 'the preferred display is connected; its power is not known')
+$pick = Select-VisualsScreen $layout 'Big TV' 'off'
+Check 'a preferred display that is off gives way to a screen that is not the primary' ($pick.Screen.Device -eq '\\.\DISPLAY2' -and $pick.PreferredListed -and $pick.Reason -eq 'the preferred display is off; first screen other than the primary')
+Check 'the placement records the power reading it was chosen with' ($pick.Power -eq 'off' -and (Select-VisualsScreen $layout 'Big TV' 'none').Power -eq 'none')
+$pick = Select-VisualsScreen @($deskLeft, $deskRight) 'Big TV' 'on'
+Check 'a preferred display Windows does not list gives way to a screen that is not the primary' ($pick.Screen.Device -eq '\\.\DISPLAY2' -and -not $pick.PreferredListed -and $pick.Reason -eq 'the preferred display is not connected; first screen other than the primary')
+$farLeft = New-Screen '\\.\DISPLAY4' @('Side Monitor') -1920 0 1920 1080
+$farLeftLow = New-Screen '\\.\DISPLAY5' @('Side Monitor') -1920 1080 1920 1080
+$pick = Select-VisualsScreen @($farLeftLow, $deskLeft, $deskRight, $tv, $farLeft) 'Big TV' 'off'
+Check 'of several other screens the leftmost is taken, the top one of two at the same left edge' ($pick.Screen.Device -eq '\\.\DISPLAY4')
+$pick = Select-VisualsScreen @($deskLeft, $tv) 'Big TV' 'off'
+Check 'with only the primary left the visuals open there' ($pick.Screen.Device -eq '\\.\DISPLAY1' -and $pick.Reason -eq 'the preferred display is off; no screen other than the primary')
+$pick = Select-VisualsScreen @($deskLeft) 'Big TV' 'on'
+Check 'a single screen takes the visuals' ($pick.Screen.Device -eq '\\.\DISPLAY1' -and $pick.Reason -eq 'the preferred display is not connected; no screen other than the primary')
+$tvFirst = New-Screen '\\.\DISPLAY1' @('Big TV') 0 0 3840 2160 $true
+$pick = Select-VisualsScreen @($tvFirst, (New-Screen '\\.\DISPLAY2' @('Desk Monitor') 3840 0 3840 1600)) 'Big TV' 'on'
+Check 'a preferred display that is the primary is still the preferred display' ($pick.Screen.Device -eq '\\.\DISPLAY1' -and $pick.PreferredListed)
+$pick = Select-VisualsScreen $layout 'big tv' 'on'
+$part = Select-VisualsScreen $layout 'TV' 'on'
+Check 'the display name matches whole, in any letter case' ($pick.Screen.Device -eq '\\.\DISPLAY3' -and $pick.PreferredListed -and -not $part.PreferredListed -and $part.Reason.StartsWith('the preferred display is not connected'))
+$pick = Select-VisualsScreen $layout 'Desk Monitor' 'on'
+Check 'of two screens with the preferred name the one that is not the primary is taken' ($pick.Screen.Device -eq '\\.\DISPLAY2')
+$clone = New-Screen '\\.\DISPLAY2' @('Desk Monitor', 'Big TV') 3840 0 3840 1600
+$pick = Select-VisualsScreen @($deskLeft, $clone) 'Big TV' 'on'
+Check 'a preferred display mirroring another screen is found on that screen' ($pick.Screen.Device -eq '\\.\DISPLAY2' -and $pick.PreferredListed)
+$pick = Select-VisualsScreen @() 'Big TV' 'on'
+Check 'no listed screen leaves the window where Chrome last left it' ($null -eq $pick.Screen -and $null -eq $pick.Position -and $pick.Reason -eq 'Windows listed no screen')
+
+$pick = Select-VisualsScreen $layout 'Big TV' 'on'
+Check 'at 100 % the window covers the chosen screen in its own pixels' ($pick.Position -eq '1920,-2160' -and $pick.Size -eq '3840,2160')
+$scaled = @($layout | ForEach-Object { $s = $_.PSObject.Copy(); $s.Dpi = 120; $s })
+$pick = Select-VisualsScreen $scaled 'Big TV' 'on'
+Check 'one shared scale factor converts to Chrome''s device-independent pixels' ($pick.Position -eq '1536,-1728' -and $pick.Size -eq '3072,1728')
+$odd = @((New-Screen '\\.\DISPLAY1' @('Desk Monitor') 0 0 1000 1000 $true 144), (New-Screen '\\.\DISPLAY2' @('Big TV') 1000 1 1001 999 $false 144))
+$pick = Select-VisualsScreen $odd 'Big TV' 'on'
+Check 'fractional device-independent edges enclose the screen' ($pick.Position -eq '666,0' -and $pick.Size -eq '668,667')
+$mixed = @($deskLeft, $deskRight, (New-Screen '\\.\DISPLAY3' @('Big TV') 1920 -2160 3840 2160 $false 144))
+$pick = Select-VisualsScreen $mixed 'Big TV' 'on'
+Check 'screens with different scale factors get no window geometry and say why' ($pick.Screen.Device -eq '\\.\DISPLAY3' -and $null -eq $pick.Position -and $pick.Reason -eq 'the preferred display is connected and on; screens have different scale factors (100 %, 150 %), so Chrome opens the window where it was last left')
+$unread = @($deskLeft, (New-Screen '\\.\DISPLAY3' @('Big TV') 1920 -2160 3840 2160 $false 0))
+$pick = Select-VisualsScreen $unread 'Big TV' 'on'
+Check 'an unread scale factor gets no window geometry' ($null -eq $pick.Position -and $pick.Reason.EndsWith('; Windows did not report every screen''s scale factor, so Chrome opens the window where it was last left'))
+
+$pick = Select-VisualsScreen $layout 'Big TV' 'on'
+$placedArgs = @(Get-BrowserArguments $pick)
+Check 'a placed launch carries the chosen screen and stays fullscreen' ($placedArgs -contains '--window-position=1920,-2160' -and $placedArgs -contains '--window-size=3840,2160' -and $placedArgs -contains '--start-fullscreen' -and $placedArgs[-1] -eq ('--app=' + $VisualizerUrl))
+Check 'a placement without geometry adds none' (-not (@(Get-BrowserArguments (Select-VisualsScreen $mixed 'Big TV' 'on')) -match '^--window-'))
+Check 'the log line names the screen, its monitor, where it is and why' ((Format-VisualsPlacement (Select-VisualsScreen $layout 'Big TV' 'off')) -eq '\\.\DISPLAY2 (Desk Monitor, 3840x1600 at 3840,0): the preferred display is off; first screen other than the primary')
+Throws 'an unknown power reading is refused' { Select-VisualsScreen $layout 'Big TV' 'maybe' }
+
+Check 'Windows'' display configuration records keep their native layout' ([Runtime.InteropServices.Marshal]::SizeOf([type]'PartyBrowserNative+PathInfo') -eq 72 -and [Runtime.InteropServices.Marshal]::SizeOf([type]'PartyBrowserNative+ModeInfo') -eq 64 -and [Runtime.InteropServices.Marshal]::SizeOf([type]'PartyBrowserNative+SourceName') -eq 84 -and [Runtime.InteropServices.Marshal]::SizeOf([type]'PartyBrowserNative+TargetName') -eq 420)
+$screens = @(Get-VisualsScreens)
+Check 'this desktop lists its screens with one primary at the origin' ($screens.Count -ge 1 -and @($screens | Where-Object { $_.Primary }).Count -eq 1 -and @($screens | Where-Object { $_.Primary -and $_.X -eq 0 -and $_.Y -eq 0 }).Count -eq 1 -and @($screens | Where-Object { $_.Device -notlike '\\.\DISPLAY*' -or $_.Width -le 0 -or $_.Height -le 0 -or $_.Dpi -lt 96 }).Count -eq 0)
 $helperArgs = @(Get-HelperArguments)
 Check 'display helper has parent lifecycle and no curtain by default' ($helperArgs -contains '--parent-pid' -and $helperArgs -contains '--controls-url' -and $helperArgs -notcontains '--curtain')
 Check 'display-only helper does not collect pixel telemetry' ($helperArgs -notcontains '--telemetry-file')
@@ -207,6 +273,12 @@ Reset-Run -StopAt 3
 $code = Start-VisualsBrowser
 Check 'opens the browser once, runs the helper, and closes both on a stop request' ($code -eq 0 -and ($script:events -join ',') -eq 'browser-start,helper-start,browser-close,helper-stop')
 Check 'launch carries no window geometry' ($script:launchArgs -notmatch '--window-(position|size)=')
+$PreferredDisplay = 'Big TV'
+function Get-VisualsScreens { $layout }
+Reset-Run -StopAt 3
+[void](Start-VisualsBrowser)
+Check 'with a preferred display each launch carries the chosen screen' ($script:launchArgs -match '"--window-position=1920,-2160" "--window-size=3840,2160"' -and (Format-VisualsPlacement $script:VisualsPlacement).StartsWith('\\.\DISPLAY3 (Big TV, '))
+$PreferredDisplay = ''
 Reset-Run -StopAt 0
 $code = Start-VisualsBrowser
 Check 'a stop request keeps the launcher from opening anything' ($code -eq 0 -and $script:events.Count -eq 0)

@@ -19,8 +19,13 @@ type Backend struct {
 	ConfigPath string
 	// Notice receives each closed or still open window Windows restored.
 	Notice func(string)
+	// Power reads the preferred display's power for each session; Placed
+	// receives where each session opened the visuals.
+	Power  func() string
+	Placed func(Placement)
 	mu     sync.Mutex
 	stuck  map[browserID]bool
+	placed Placement
 }
 
 const (
@@ -49,7 +54,9 @@ func (b *Backend) Start(ctx context.Context) (lifecycle.Session, error) {
 	if e != nil {
 		return nil, e
 	}
-	cmd := exec.Command(shell, "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-File", b.Config.WorkerScript, "-ConfigPath", b.ConfigPath)
+	power := b.power()
+	b.place(Placement{Power: power})
+	cmd := exec.Command(shell, b.command(power)...)
 	hide(cmd)
 	in, e := cmd.StdinPipe()
 	if e != nil {
@@ -80,19 +87,12 @@ func (b *Backend) Start(ctx context.Context) (lifecycle.Session, error) {
 		scan := bufio.NewScanner(out)
 		scan.Buffer(make([]byte, 4096), 65536)
 		for scan.Scan() {
-			var v struct {
-				Event  string `json:"event"`
-				Reason string `json:"reason"`
-			}
-			if json.Unmarshal(scan.Bytes(), &v) != nil {
-				continue
-			}
-			switch v.Event {
+			switch event, reason := b.event(scan.Bytes()); event {
 			case "ready":
 				ready <- nil
 			case "error":
-				e := errors.New(v.Reason)
-				if v.Reason == lifecycle.ErrRestoredOpen.Error() {
+				e := errors.New(reason)
+				if reason == lifecycle.ErrRestoredOpen.Error() {
 					e = lifecycle.ErrRestoredOpen
 				}
 				select {
@@ -128,6 +128,29 @@ func (b *Backend) Start(ctx context.Context) (lifecycle.Session, error) {
 		return nil, e
 	}
 	return s, nil
+}
+
+// event reads one worker line and records a display placement it reports,
+// with the power reading the worker chose the screen with.
+func (b *Backend) event(line []byte) (event, reason string) {
+	var v struct {
+		Event           string `json:"event"`
+		Reason          string `json:"reason"`
+		Text            string `json:"text"`
+		PreferredListed bool   `json:"preferredListed"`
+		Power           string `json:"power"`
+	}
+	if json.Unmarshal(line, &v) != nil {
+		return "", ""
+	}
+	if v.Event == "display" {
+		p := Placement{Text: v.Text, PreferredListed: v.PreferredListed, Power: v.Power}
+		b.place(p)
+		if b.Placed != nil {
+			b.Placed(p)
+		}
+	}
+	return v.Event, v.Reason
 }
 func (s *session) Done() <-chan error { return s.done }
 func (s *session) finish(err error) {

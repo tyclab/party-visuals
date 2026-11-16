@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"unicode"
 )
 
 type Config struct {
@@ -38,6 +39,9 @@ type Config struct {
 	PartyPollMs            int    `json:"partyPollMs"`
 	LightshowEntity        string `json:"lightshowEntity"`
 	LightshowValue         string `json:"lightshowValue"`
+	// Optional: the monitor the visuals open on, and the entity that says it is off.
+	PreferredDisplay   string `json:"preferredDisplay"`
+	DisplayPowerEntity string `json:"displayPowerEntity"`
 }
 
 var entityID = regexp.MustCompile(`^[a-z0-9_]+\.[a-z0-9_]+$`)
@@ -87,7 +91,13 @@ func Load(path string) (Config, error) {
 	if browserRoot(c.BrowserProfile) {
 		return c, errors.New(`browserProfile must be a dedicated folder, not a browser's own profile folder (a User Data folder in %LOCALAPPDATA%, such as Google\Chrome\User Data)`)
 	}
-	if c.HomeAssistantURL == "" && c.HomeAssistantTokenFile == "" && c.PartyEntity == "" && c.PartyValue == "" && c.PartyPollMs == 0 && c.LightshowEntity == "" && c.LightshowValue == "" {
+	if d := c.PreferredDisplay; d != "" && (len([]rune(d)) > 64 || strings.TrimSpace(d) != d || strings.ContainsFunc(d, unicode.IsControl)) {
+		return c, errors.New("preferredDisplay must be one monitor name as Windows shows it, at most 64 characters, without surrounding spaces")
+	}
+	if c.DisplayPowerEntity != "" && c.PreferredDisplay == "" {
+		return c, errors.New("displayPowerEntity needs preferredDisplay: it says when that display is off")
+	}
+	if c.HomeAssistantURL == "" && c.HomeAssistantTokenFile == "" && c.PartyEntity == "" && c.PartyValue == "" && c.PartyPollMs == 0 && c.LightshowEntity == "" && c.LightshowValue == "" && c.DisplayPowerEntity == "" {
 		return c, nil
 	}
 	u, e = url.Parse(c.HomeAssistantURL)
@@ -108,6 +118,9 @@ func Load(path string) (Config, error) {
 	}
 	if !entityID.MatchString(c.PartyEntity) {
 		return c, errors.New("partyEntity must be a Home Assistant entity id such as sensor.house_mode_code")
+	}
+	if c.DisplayPowerEntity != "" && !entityID.MatchString(c.DisplayPowerEntity) {
+		return c, errors.New("displayPowerEntity must be a Home Assistant entity id such as media_player.living_room_tv")
 	}
 	if c.PartyPollMs < 1000 || c.PartyPollMs > 60000 {
 		return c, errors.New("partyPollMs must be between 1000 and 60000")

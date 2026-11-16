@@ -18,7 +18,10 @@ native one on its now-playing page, or this bundle's **live-audio visualizer**, 
 from the engine's live input. The one setting `visualizerUrl` (the launcher's
 `-VisualizerUrl`) chooses ([Choosing the visualizer](#choosing-the-visualizer)). The
 browser launcher opens it in a dedicated persistent profile on whichever screen it was
-last left and follows the existing Companion visual on/off controls. OBS is not part
+last left, or, with a preferred display configured, on that display while it is connected
+and on and otherwise on a screen that is not the primary
+([Choosing the screen](controller/README.md#choosing-the-screen)). It follows the existing
+Companion visual on/off controls. OBS is not part
 of this workflow. The wash and bar below remain available as optional local graphics.
 
 - **Colour wash** (`graphics/wash.html`): the whole frame in the engine's palette, to
@@ -203,10 +206,13 @@ After `-Stop` they stay closed, across session moves and task restarts, until
 `%LOCALAPPDATA%\PartyVisuals\browser-visuals.stop`. `Stop-ScheduledTask` alone
 leaves the window open, and the next session connect or unlock starts the task again.
 
-The launcher sets no screen or window size. Chrome reopens the app window on the
-screen where it was last closed, so put it where it belongs once: leave fullscreen
-with F11, drag it to that screen and press F11 again, or move it fullscreen with
-Win+Shift+Left/Right. Chrome uses a dedicated persistent profile and an ephemeral
+Without `-PreferredDisplay` the launcher sets no screen or window size. Chrome reopens
+the app window on the screen where it was last closed, so put it where it belongs once:
+leave fullscreen with F11, drag it to that screen and press F11 again, or move it
+fullscreen with Win+Shift+Left/Right. With `-PreferredDisplay "<monitor name>"` each open
+chooses the screen by the controller's rule
+([Choosing the screen](controller/README.md#choosing-the-screen)) without a power reading,
+so a connected preferred display counts as on, and prints the choice. Chrome uses a dedicated persistent profile and an ephemeral
 loopback debugging port; the helper accesses only the configured page, Music
 Assistant's player page or the live-audio page.
 
