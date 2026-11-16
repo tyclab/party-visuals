@@ -85,8 +85,8 @@ polling for both, and the display power reading too. A switch between Follow Par
 and stops nothing by itself: visuals that run or are starting carry on until
 the new mode's first reading, which is applied whatever it says, and
 otherwise nothing starts before that reading asks for it. Visuals carried on
-this way that then stop, by Stop, sleep or a closed window, start again only
-on the new mode's reading. The same holds when the switch goes by way of
+this way that then stop, by Stop, sleep, a closed window or a reopen on
+another screen, start again only on the new mode's reading. The same holds when the switch goes by way of
 Manual: a reading one follow mode took does not start visuals in the other. Switching to Manual mode and back to the same
 follow mode works as for Follow Party.
 
