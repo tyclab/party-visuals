@@ -83,8 +83,10 @@ entity, so switching leaves no other entity polled, and a rejected token stops
 polling for both. A switch between Follow Party and Follow Lightshow starts
 and stops nothing by itself: visuals that run or are starting carry on until
 the new mode's first reading, which is applied whatever it says, and
-otherwise nothing starts before that reading asks for it. Switching to Manual
-mode and back works as for Follow Party.
+otherwise nothing starts before that reading asks for it. The same holds when
+the switch goes by way of Manual: a reading one follow mode took does not
+start visuals in the other. Switching to Manual mode and back to the same
+follow mode works as for Follow Party.
 
 The source is configured by optional keys in the controller's `config.json`.
 Without them nothing polls, each follow mode waits for `party on`, and
