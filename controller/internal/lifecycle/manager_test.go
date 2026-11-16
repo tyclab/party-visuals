@@ -6,6 +6,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -1061,4 +1062,77 @@ func TestAfterASwitchTheSignInSweepDoesNotRetryTheOtherSourcesStart(t *testing.T
 	}
 	m.Event("follow-lightshow", "party-on")
 	eventually(t, func() bool { return m.Snapshot().Phase == "running" })
+}
+
+func TestAReadingDoesNotCarryThroughManualIntoTheOtherFollowMode(t *testing.T) {
+	for name, before := range map[string]func(*Manager){
+		"Off, then Start":      func(m *Manager) { m.Apply("stop") },
+		"suspended, then wake": func(m *Manager) { m.Apply("suspend") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			b := &fakeBackend{}
+			m, _ := newManager(t, b)
+			m.Apply("follow-party")
+			m.Apply("start")
+			if e := m.Event("follow-party", "party-on"); e != nil {
+				t.Fatal(e)
+			}
+			eventually(t, func() bool { return m.Snapshot().Phase == "running" })
+			before(m)
+			settled(t, m)
+			m.Apply("manual")
+			m.Apply("follow-lightshow")
+			m.Apply("start")
+			m.Apply("resume")
+			if s := settled(t, m); s.Phase == "running" || s.Party || b.count() != 1 {
+				t.Fatalf("visuals started on Follow Party's reading after Manual: %+v, %d sessions", s, b.count())
+			}
+			m.Event("follow-lightshow", "party-on")
+			eventually(t, func() bool { return m.Snapshot().Phase == "running" })
+		})
+	}
+}
+
+func TestTheLastStateHandedOutIsTheNewest(t *testing.T) {
+	var mu sync.Mutex
+	var modes []string
+	release := make(chan struct{})
+	m, e := New(FileStore{filepath.Join(t.TempDir(), "intent.json")}, &fakeBackend{}, func(s Status) {
+		if s.Phase == "running" && s.Intent.Mode == "follow-party" {
+			<-release
+		}
+		mu.Lock()
+		modes = append(modes, s.Intent.Mode)
+		mu.Unlock()
+	})
+	if e != nil {
+		t.Fatal(e)
+	}
+	t.Cleanup(func() { m.Close() })
+	m.Apply("follow-party")
+	m.Apply("start")
+	m.Event("follow-party", "party-on")
+	eventually(t, func() bool { return m.Snapshot().Phase == "running" })
+	switched := make(chan struct{})
+	go func() { m.Apply("follow-lightshow"); close(switched) }()
+	eventually(t, func() bool { return m.Snapshot().Intent.Mode == "follow-lightshow" })
+	time.Sleep(20 * time.Millisecond)
+	close(release)
+	<-switched
+	m.mu.Lock()
+	m.seq++
+	stale, seq := m.state, m.seq
+	m.mu.Unlock()
+	stale.Intent.Mode = "follow-party"
+	m.Apply("follow-party")
+	m.Apply("follow-lightshow")
+	m.notify(stale, seq)
+	mu.Lock()
+	defer mu.Unlock()
+	if last := modes[len(modes)-1]; last != "follow-lightshow" {
+		t.Fatalf("the last state handed out was in %s, the manager is in follow-lightshow: %v", last, modes)
+	}
+	if !slices.Equal(modes[len(modes)-4:], []string{"follow-party", "follow-lightshow", "follow-party", "follow-lightshow"}) {
+		t.Fatalf("states out of order: %v", modes)
+	}
 }

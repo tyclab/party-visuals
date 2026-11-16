@@ -5,12 +5,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"github.com/tyclab/party-visuals/controller/internal/lifecycle"
 	"github.com/tyclab/party-visuals/controller/internal/owner"
 	"github.com/tyclab/party-visuals/controller/internal/partysource"
 	"github.com/tyclab/party-visuals/controller/internal/worker"
 	"io"
 	"log"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -548,5 +551,40 @@ func TestAnOffThatCloseCouldNotSaveIsNamedInControllerLog(t *testing.T) {
 	closing(m, &controllerLog{Logger: log.New(&out, "", 0)})
 	if out.Len() != 0 {
 		t.Fatalf("a Close with nothing left to do logged %q", out.String())
+	}
+}
+
+func TestEachFollowModeComparesItsOwnEntityWithItsOwnValue(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		entity := strings.TrimPrefix(r.URL.Path, "/api/states/")
+		state, ok := map[string]string{"sensor.house_mode_code": "3", "binary_sensor.engine_visualizer": "on"}[entity]
+		if !ok {
+			http.NotFound(w, r)
+			return
+		}
+		fmt.Fprintf(w, `{"entity_id":%q,"state":%q,"attributes":{}}`, entity, state)
+	}))
+	defer server.Close()
+	token := filepath.Join(t.TempDir(), "ha.token")
+	os.WriteFile(token, []byte("example-token\n"), 0600)
+	ownerOnly(t, token)
+	c := worker.Config{HomeAssistantURL: server.URL, HomeAssistantTokenFile: token, PartyEntity: "sensor.house_mode_code", PartyValue: "3", PartyPollMs: 1000, LightshowEntity: "binary_sensor.engine_visualizer", LightshowValue: "on"}
+	events := make(chan string, 8)
+	source := followSource(c, func(mode, command string) error { events <- mode + " " + command; return nil }, func(string, ...any) {})
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	defer func() { cancel(); <-done }()
+	source.Follow("follow-party")
+	go func() { defer close(done); source.Run(ctx) }()
+	for _, want := range []string{"follow-party party-on", "follow-lightshow party-on"} {
+		select {
+		case got := <-events:
+			if got != want {
+				t.Fatalf("got %q, want %q", got, want)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatalf("no %q", want)
+		}
+		source.Follow("follow-lightshow")
 	}
 }

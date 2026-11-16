@@ -20,6 +20,7 @@ import (
 type reply struct {
 	code  int
 	state string
+	wait  bool // answer only once the rig's release closes
 }
 
 type rig struct {
@@ -36,6 +37,8 @@ type rig struct {
 	waits    []time.Duration
 	logs     []string
 	hold     bool
+	release  chan struct{}
+	refuse   int // commands the controller refuses before it takes one
 }
 
 var (
@@ -55,6 +58,9 @@ func newRig(t *testing.T, token string, replies ...reply) *rig {
 		if (entity != party.Entity && entity != lightshow.Entity) || n >= len(replies) {
 			http.NotFound(w, req)
 			return
+		}
+		if replies[n].wait {
+			<-r.release
 		}
 		switch v := replies[n]; {
 		case v.state == "hang":
@@ -84,6 +90,10 @@ func (r *rig) command(mode, c string) error {
 	defer r.mu.Unlock()
 	r.commands = append(r.commands, c)
 	r.modes = append(r.modes, mode)
+	if r.refuse > 0 {
+		r.refuse--
+		return fmt.Errorf("%s is no longer the selected mode", mode)
+	}
 	return nil
 }
 func (r *rig) logf(format string, args ...any) {
@@ -319,21 +329,62 @@ func TestASwitchBetweenTargetsPollsOnlyTheSelectedEntity(t *testing.T) {
 }
 
 func TestARejectedTokenStopsPollingForEveryTarget(t *testing.T) {
-	r := newRig(t, "example-token", reply{code: 403}, reply{state: "on"})
-	if e := r.run(); e == nil {
-		t.Fatal("a rejected token kept polling")
+	for i, target := range []Target{party, lightshow} {
+		other := []Target{party, lightshow}[1-i]
+		t.Run(target.Mode, func(t *testing.T) {
+			r := newRig(t, "example-token", reply{code: 403}, reply{state: "on"})
+			if e := r.follow(target.Mode); e == nil {
+				t.Fatal("a rejected token kept polling")
+			}
+			r.source.Follow(other.Mode)
+			time.Sleep(20 * time.Millisecond)
+			if _, _, requests := r.snapshot(); requests != 1 {
+				t.Fatalf("%d requests: %s sent the rejected token again", requests, other.Name)
+			}
+			for _, mode := range []string{party.Mode, lightshow.Mode} {
+				if s := r.source.Status(mode); s.State != "refused" || !strings.HasPrefix(s.Summary, "not polling: Home Assistant rejected the token") {
+					t.Fatalf("%s: %+v", mode, s)
+				}
+			}
+			if !slices.Contains(r.logs, "Follow Party and Follow Lightshow: not polling Home Assistant: Home Assistant rejected the token (403 Forbidden); fix the token file and restart the controller") {
+				t.Fatalf("logs %q", r.logs)
+			}
+		})
 	}
+}
+
+func TestAReadingInFlightAtASwitchCountsForTheModeItWasReadFor(t *testing.T) {
+	r := newRig(t, "example-token", reply{state: "3", wait: true}, reply{state: "off"})
+	r.release = make(chan struct{})
+	r.hold = true
+	done := make(chan error, 1)
+	go func() { done <- r.source.Run(r.ctx) }()
+	r.source.Follow(party.Mode)
+	eventually(t, func() bool { _, _, n := r.snapshot(); return n == 1 })
 	r.source.Follow(lightshow.Mode)
-	time.Sleep(20 * time.Millisecond)
-	if _, _, requests := r.snapshot(); requests != 1 {
-		t.Fatalf("%d requests: Follow Lightshow sent the rejected token again", requests)
+	close(r.release)
+	eventually(t, func() bool { c, _, _ := r.snapshot(); return len(c) == 2 })
+	r.cancel()
+	if e := <-done; e != nil {
+		t.Fatal(e)
 	}
-	for _, mode := range []string{party.Mode, lightshow.Mode} {
-		if s := r.source.Status(mode); s.State != "refused" || !strings.HasPrefix(s.Summary, "not polling: Home Assistant rejected the token") {
-			t.Fatalf("%s: %+v", mode, s)
-		}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !reflect.DeepEqual(r.commands, []string{"party-on", "party-off"}) || !reflect.DeepEqual(r.modes, []string{party.Mode, lightshow.Mode}) {
+		t.Fatalf("commands %v for %v: a reading must carry the mode it was read for", r.commands, r.modes)
 	}
-	if !slices.Contains(r.logs, "Follow Party and Follow Lightshow: not polling Home Assistant: Home Assistant rejected the token (403 Forbidden); fix the token file and restart the controller") {
+}
+
+func TestAReadingTheControllerRefusedIsSentAgain(t *testing.T) {
+	r := newRig(t, "example-token", reply{state: "3"}, reply{state: "3"}, reply{state: "3"})
+	r.refuse = 1
+	if e := r.run(); e != nil {
+		t.Fatal(e)
+	}
+	if commands, _, _ := r.snapshot(); !reflect.DeepEqual(commands, []string{"party-on", "party-on"}) {
+		t.Fatalf("commands %v: a refused party-on must be sent again on the next reading, and only until it is taken", commands)
+	}
+	if !slices.Contains(r.logs, `Follow Party: sensor.house_mode_code is "3" but the controller refused party-on: follow-party is no longer the selected mode`) {
 		t.Fatalf("logs %q", r.logs)
 	}
 }

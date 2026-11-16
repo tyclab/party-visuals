@@ -218,7 +218,7 @@ function Cutover-Controller($Journal) {
     $guard = Stop-RunningController 'The running controller has not stopped; its task stays disabled. Stop it, then retry Cutover.'
     try {
     Save-ControllerJson (Join-Path $StateRoot 'config.json') (Get-Content -LiteralPath $Journal.config -Raw | ConvertFrom-Json)
-    # Visuals begin Off: the new controller keeps a Start that Follow Party had.
+    # Visuals begin Off: the new controller keeps a Start that a follow mode had.
     Save-ControllerOff
     foreach ($record in $Journal.tasks) {
         $task = Get-ScheduledTask -TaskName $record.name -ErrorAction SilentlyContinue

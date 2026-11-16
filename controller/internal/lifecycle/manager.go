@@ -64,9 +64,13 @@ type Manager struct {
 	store   Store
 	state   Status
 	saved   Intent // what the store holds; differs after a Stop whose Off could not be saved
+	partyBy string // the follow mode whose source set Party; empty when set by hand
 	cancel  context.CancelFunc
 	session Session
 	changed func(Status)
+	seq     uint64     // counts the states handed to notify; guarded by mu
+	tell    sync.Mutex // orders calls of changed
+	told    uint64     // seq of the newest state changed received; guarded by tell
 	closed  bool
 	wg      sync.WaitGroup
 	life    context.Context // ends at Close, with any sweep in progress
@@ -93,8 +97,17 @@ func New(store Store, backend Backend, changed func(Status)) (*Manager, error) {
 }
 
 func (m *Manager) Snapshot() Status { m.mu.Lock(); defer m.mu.Unlock(); return m.state }
-func (m *Manager) notify(s Status) {
-	if m.changed != nil {
+
+// notify hands changed the state numbered seq, in order: a state that a newer
+// one overtook on its way here is dropped, so changed ends on the newest state.
+func (m *Manager) notify(s Status, seq uint64) {
+	if m.changed == nil {
+		return
+	}
+	m.tell.Lock()
+	defer m.tell.Unlock()
+	if seq > m.told {
+		m.told = seq
 		m.changed(s)
 	}
 }
@@ -145,15 +158,19 @@ func (m *Manager) apply(command, reason string, expectedGeneration uint64, forMo
 	case "stop":
 		next.Intent.Requested, next.Intent.ManualOff = false, true
 	case "manual", "follow-party", "follow-lightshow":
-		// The party state came from the other source: only a session that runs or starts keeps it until the new one reads.
-		if Follows(command) && Follows(next.Intent.Mode) && command != next.Intent.Mode && next.Phase != "running" && next.Phase != "starting" {
+		// The party state came from the other source, also by way of Manual:
+		// only a session that runs or starts keeps it until the new one reads.
+		from := next.Intent.Mode
+		if !Follows(from) {
+			from = m.partyBy
+		}
+		if Follows(command) && Follows(from) && command != from && next.Phase != "running" && next.Phase != "starting" {
 			next.Party = false
 		}
 		next.Intent.Mode = command
-	case "party-on":
-		next.Party = true
-	case "party-off":
-		next.Party = false
+	case "party-on", "party-off":
+		next.Party = command == "party-on"
+		m.partyBy = forMode
 	case "suspend":
 		next.Suspended = true
 	case "resume":
@@ -189,9 +206,10 @@ func (m *Manager) apply(command, reason string, expectedGeneration uint64, forMo
 	m.state = next
 	want := next.Intent.Requested && !next.Intent.ManualOff && !next.Suspended && (next.Intent.Mode == "manual" || next.Party)
 	if want && previousWant && (m.state.Phase == "running" || m.state.Phase == "starting") {
-		s := m.state
+		m.seq++
+		s, seq := m.state, m.seq
 		m.mu.Unlock()
-		m.notify(s)
+		m.notify(s, seq)
 		return persistenceError
 	}
 	m.state.Generation++
@@ -205,11 +223,12 @@ func (m *Manager) apply(command, reason string, expectedGeneration uint64, forMo
 	if want {
 		m.state.Phase = "starting"
 	}
-	s := m.state
+	m.seq++
+	s, seq := m.state, m.seq
 	m.wg.Add(1)
 	go func() { defer m.wg.Done(); m.reconcile(ctx, gen, want) }()
 	m.mu.Unlock()
-	m.notify(s)
+	m.notify(s, seq)
 	return persistenceError
 }
 
@@ -268,9 +287,10 @@ func (m *Manager) publish(gen uint64, phase, reason string) {
 		return
 	}
 	m.state.Phase, m.state.Reason = phase, reason
-	s := m.state
+	m.seq++
+	s, seq := m.state, m.seq
 	m.mu.Unlock()
-	m.notify(s)
+	m.notify(s, seq)
 }
 
 // stop ends session; a failure counts only while the session has not ended,
