@@ -38,6 +38,7 @@ type rig struct {
 	logs     []string
 	hold     bool
 	release  chan struct{}
+	freed    sync.Once
 	refuse   int // commands the controller refuses before it takes one
 }
 
@@ -72,6 +73,7 @@ func newRig(t *testing.T, token string, replies ...reply) *rig {
 		}
 	}))
 	t.Cleanup(server.Close)
+	t.Cleanup(r.free)
 	file := filepath.Join(t.TempDir(), "ha.token")
 	if e := os.WriteFile(file, []byte(token), 0600); e != nil {
 		t.Fatal(e)
@@ -95,6 +97,15 @@ func (r *rig) command(mode, c string) error {
 		return fmt.Errorf("%s is no longer the selected mode", mode)
 	}
 	return nil
+}
+
+// free lets held answers go; cleanup calls it too, so a failed test cannot hold the server.
+func (r *rig) free() {
+	r.freed.Do(func() {
+		if r.release != nil {
+			close(r.release)
+		}
+	})
 }
 func (r *rig) logf(format string, args ...any) {
 	r.mu.Lock()
@@ -362,7 +373,7 @@ func TestAReadingInFlightAtASwitchCountsForTheModeItWasReadFor(t *testing.T) {
 	r.source.Follow(party.Mode)
 	eventually(t, func() bool { _, _, n := r.snapshot(); return n == 1 })
 	r.source.Follow(lightshow.Mode)
-	close(r.release)
+	r.free()
 	eventually(t, func() bool { c, _, _ := r.snapshot(); return len(c) == 2 })
 	r.cancel()
 	if e := <-done; e != nil {
