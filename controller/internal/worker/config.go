@@ -31,12 +31,14 @@ type Config struct {
 	Panels         string `json:"panels"`
 	Fixture        int    `json:"fixture"`
 	FPS            int    `json:"fps"`
-	// Optional Follow Party source; the token stays in its own file.
+	// Optional Follow Party and Follow Lightshow source; the token stays in its own file.
 	HomeAssistantURL       string `json:"homeAssistantUrl"`
 	HomeAssistantTokenFile string `json:"homeAssistantTokenFile"`
 	PartyEntity            string `json:"partyEntity"`
 	PartyValue             string `json:"partyValue"`
 	PartyPollMs            int    `json:"partyPollMs"`
+	LightshowEntity        string `json:"lightshowEntity"`
+	LightshowValue         string `json:"lightshowValue"`
 	// Optional: the monitor the visuals open on, and the entity that says it is off.
 	PreferredDisplay   string `json:"preferredDisplay"`
 	DisplayPowerEntity string `json:"displayPowerEntity"`
@@ -95,7 +97,7 @@ func Load(path string) (Config, error) {
 	if c.DisplayPowerEntity != "" && c.PreferredDisplay == "" {
 		return c, errors.New("displayPowerEntity needs preferredDisplay: it says when that display is off")
 	}
-	if c.HomeAssistantURL == "" && c.HomeAssistantTokenFile == "" && c.PartyEntity == "" && c.PartyValue == "" && c.PartyPollMs == 0 && c.DisplayPowerEntity == "" {
+	if c.HomeAssistantURL == "" && c.HomeAssistantTokenFile == "" && c.PartyEntity == "" && c.PartyValue == "" && c.PartyPollMs == 0 && c.LightshowEntity == "" && c.LightshowValue == "" && c.DisplayPowerEntity == "" {
 		return c, nil
 	}
 	u, e = url.Parse(c.HomeAssistantURL)
@@ -122,6 +124,15 @@ func Load(path string) (Config, error) {
 	}
 	if c.PartyPollMs < 1000 || c.PartyPollMs > 60000 {
 		return c, errors.New("partyPollMs must be between 1000 and 60000")
+	}
+	if c.LightshowEntity == "" && c.LightshowValue == "" {
+		return c, nil
+	}
+	if !entityID.MatchString(c.LightshowEntity) {
+		return c, errors.New("lightshowEntity must be a Home Assistant entity id such as binary_sensor.engine_visualizer")
+	}
+	if c.LightshowValue == "" {
+		c.LightshowValue = "on"
 	}
 	return c, nil
 }

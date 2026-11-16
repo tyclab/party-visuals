@@ -58,7 +58,7 @@ func newPowerRig(t *testing.T, token string, replies ...reply) *powerRig {
 	fakeACL(t, grants(testUser), nil)
 	r.ctx, r.cancel = context.WithCancel(context.Background())
 	t.Cleanup(r.cancel)
-	r.power = NewPower(Config{URL: server.URL, TokenFile: file, Entity: "media_player.big_tv", Poll: 5 * time.Second}, r.logf, func() {
+	r.power = NewPower(Config{URL: server.URL, TokenFile: file, Poll: 5 * time.Second}, "media_player.big_tv", r.logf, func() {
 		r.mu.Lock()
 		defer r.mu.Unlock()
 		r.seen = append(r.seen, r.power.Reading())

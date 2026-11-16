@@ -31,6 +31,7 @@ const powerSettle = 30 * time.Second
 // rejected tokens and failed readings.
 type Power struct {
 	src     *Source
+	entity  string
 	logf    func(string, ...any)
 	polled  func()
 	after   func(time.Duration) <-chan time.Time
@@ -42,11 +43,11 @@ type Power struct {
 	status  PowerStatus
 }
 
-// NewPower returns a reader of c.Entity that calls polled after each reading
+// NewPower returns a reader of entity that calls polled after each reading
 // attempt. It reads nothing before Run.
-func NewPower(c Config, logf func(string, ...any), polled func()) *Power {
-	p := &Power{src: New(c, nil, logf), logf: logf, polled: polled, after: time.After, now: time.Now, reading: "unknown"}
-	p.status = PowerStatus{State: "idle", Entity: c.Entity, Reading: "unknown", Summary: "not read yet"}
+func NewPower(c Config, entity string, logf func(string, ...any), polled func()) *Power {
+	p := &Power{src: New(c, nil, logf), entity: entity, logf: logf, polled: polled, after: time.After, now: time.Now, reading: "unknown"}
+	p.status = PowerStatus{State: "idle", Entity: entity, Reading: "unknown", Summary: "not read yet"}
 	return p
 }
 
@@ -80,7 +81,7 @@ func (p *Power) Status() PowerStatus {
 // Run polls until ctx ends, or returns an error when it refuses the token.
 // A failed reading keeps the reading and backs off up to 60 s.
 func (p *Power) Run(ctx context.Context) error {
-	entity := p.src.config.Entity
+	entity := p.entity
 	token, e := ReadToken(p.src.config.TokenFile)
 	if e != nil {
 		return p.refuse(e)
@@ -88,7 +89,7 @@ func (p *Power) Run(ctx context.Context) error {
 	p.logf("Display power: polling %s every %s", entity, p.src.config.Poll)
 	var failures int
 	for {
-		state, e := p.src.read(ctx, token)
+		state, e := p.src.read(ctx, token, entity)
 		if ctx.Err() != nil {
 			return nil
 		}
@@ -145,7 +146,7 @@ func (p *Power) observe(entity, state string) {
 func (p *Power) refuse(e error) error {
 	p.logf("Display power: not polling Home Assistant: %v", e)
 	p.mu.Lock()
-	p.status = PowerStatus{State: "refused", Entity: p.src.config.Entity, Reading: p.reading, Error: e.Error(), Summary: "not polling: " + e.Error()}
+	p.status = PowerStatus{State: "refused", Entity: p.entity, Reading: p.reading, Error: e.Error(), Summary: "not polling: " + e.Error()}
 	p.mu.Unlock()
 	return e
 }

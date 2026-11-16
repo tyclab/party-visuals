@@ -37,7 +37,7 @@ func TestATokenFileOtherAccountsCanOpenIsRefusedBeforeAnyRequest(t *testing.T) {
 	if requests != 0 || len(commands) != 0 {
 		t.Fatalf("%d requests, commands %v", requests, commands)
 	}
-	if s := r.source.Status(); s.State != "refused" || !strings.Contains(s.Summary, users) {
+	if s := r.source.Status(party.Mode); s.State != "refused" || !strings.Contains(s.Summary, users) {
 		t.Fatalf("status %+v", s)
 	}
 	file := r.source.config.TokenFile

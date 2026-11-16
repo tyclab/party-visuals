@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -29,11 +30,18 @@ type rig struct {
 	mu       sync.Mutex
 	replies  []reply
 	auth     []string
+	paths    []string
 	commands []string
+	modes    []string
 	waits    []time.Duration
 	logs     []string
 	hold     bool
 }
+
+var (
+	party     = Target{Mode: "follow-party", Name: "Follow Party", Entity: "sensor.house_mode_code", Value: "3"}
+	lightshow = Target{Mode: "follow-lightshow", Name: "Follow Lightshow", Entity: "binary_sensor.engine_visualizer", Value: "on"}
+)
 
 func newRig(t *testing.T, token string, replies ...reply) *rig {
 	r := &rig{t: t, replies: replies}
@@ -41,8 +49,10 @@ func newRig(t *testing.T, token string, replies ...reply) *rig {
 		r.mu.Lock()
 		n := len(r.auth)
 		r.auth = append(r.auth, req.Header.Get("Authorization"))
+		r.paths = append(r.paths, req.URL.Path)
 		r.mu.Unlock()
-		if req.URL.Path != "/api/states/sensor.house_mode_code" || n >= len(replies) {
+		entity := strings.TrimPrefix(req.URL.Path, "/api/states/")
+		if (entity != party.Entity && entity != lightshow.Entity) || n >= len(replies) {
 			http.NotFound(w, req)
 			return
 		}
@@ -52,7 +62,7 @@ func newRig(t *testing.T, token string, replies ...reply) *rig {
 		case v.code != 0:
 			http.Error(w, "scripted failure", v.code)
 		default:
-			fmt.Fprintf(w, `{"entity_id":"sensor.house_mode_code","state":%q,"attributes":{}}`, v.state)
+			fmt.Fprintf(w, `{"entity_id":%q,"state":%q,"attributes":{}}`, entity, v.state)
 		}
 	}))
 	t.Cleanup(server.Close)
@@ -63,16 +73,17 @@ func newRig(t *testing.T, token string, replies ...reply) *rig {
 	fakeACL(t, grants(testUser), nil)
 	r.ctx, r.cancel = context.WithCancel(context.Background())
 	t.Cleanup(r.cancel)
-	r.source = New(Config{URL: server.URL, TokenFile: file, Entity: "sensor.house_mode_code", Value: "3", Poll: 5 * time.Second}, r.command, r.logf)
+	r.source = New(Config{URL: server.URL, TokenFile: file, Poll: 5 * time.Second, Targets: []Target{party, lightshow}}, r.command, r.logf)
 	r.source.client = server.Client()
 	r.source.client.Timeout = 200 * time.Millisecond
 	r.source.after = r.after
 	return r
 }
-func (r *rig) command(c string) error {
+func (r *rig) command(mode, c string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.commands = append(r.commands, c)
+	r.modes = append(r.modes, mode)
 	return nil
 }
 func (r *rig) logf(format string, args ...any) {
@@ -99,7 +110,10 @@ func (r *rig) after(d time.Duration) <-chan time.Time {
 	return c
 }
 func (r *rig) run() error {
-	r.source.SetActive(true)
+	return r.follow(party.Mode)
+}
+func (r *rig) follow(mode string) error {
+	r.source.Follow(mode)
 	done := make(chan error, 1)
 	go func() { done <- r.source.Run(r.ctx) }()
 	select {
@@ -159,7 +173,7 @@ func TestPartyTransitionsSendEachCommandOnce(t *testing.T) {
 	if transitions != 3 {
 		t.Fatalf("%d transitions logged: %q", transitions, r.logs)
 	}
-	if s := r.source.Status(); s.State != "polling" || s.Value != "3" || !strings.Contains(s.Summary, "sensor.house_mode_code is 3") {
+	if s := r.source.Status(party.Mode); s.State != "polling" || s.Value != "3" || !strings.Contains(s.Summary, "sensor.house_mode_code is 3") {
 		t.Fatalf("status %+v", s)
 	}
 }
@@ -176,25 +190,29 @@ func TestUnchangedStateSendsNoFurtherCommand(t *testing.T) {
 }
 
 func TestFailuresBackOffToSixtySecondsAndKeepPartyState(t *testing.T) {
-	r := newRig(t, "example-token", reply{state: "3"}, reply{code: 500}, reply{code: 500}, reply{state: "hang"}, reply{code: 502}, reply{state: "unavailable"}, reply{state: "3"}, reply{state: "1"})
-	if e := r.run(); e != nil {
-		t.Fatal(e)
-	}
-	commands, waits, _ := r.snapshot()
-	if want := seconds(5, 10, 20, 40, 60, 60, 5, 5); !reflect.DeepEqual(waits, want) {
-		t.Fatalf("waits %v, want %v", waits, want)
-	}
-	if want := []string{"party-on", "party-off"}; !reflect.DeepEqual(commands, want) {
-		t.Fatalf("failures changed the party state: %v", commands)
-	}
-	failures := 0
-	for _, l := range r.logs {
-		if strings.Contains(l, "failed") {
-			failures++
-		}
-	}
-	if failures != 5 {
-		t.Fatalf("%d failures logged: %q", failures, r.logs)
+	for _, target := range []Target{party, lightshow} {
+		t.Run(target.Mode, func(t *testing.T) {
+			r := newRig(t, "example-token", reply{state: target.Value}, reply{code: 500}, reply{code: 500}, reply{state: "hang"}, reply{code: 502}, reply{state: "unavailable"}, reply{state: target.Value}, reply{state: "1"})
+			if e := r.follow(target.Mode); e != nil {
+				t.Fatal(e)
+			}
+			commands, waits, _ := r.snapshot()
+			if want := seconds(5, 10, 20, 40, 60, 60, 5, 5); !reflect.DeepEqual(waits, want) {
+				t.Fatalf("waits %v, want %v", waits, want)
+			}
+			if want := []string{"party-on", "party-off"}; !reflect.DeepEqual(commands, want) {
+				t.Fatalf("failures changed the party state: %v", commands)
+			}
+			failures := 0
+			for _, l := range r.logs {
+				if strings.HasPrefix(l, target.Name+": reading "+target.Entity+" failed") {
+					failures++
+				}
+			}
+			if failures != 5 {
+				t.Fatalf("%d failures logged: %q", failures, r.logs)
+			}
+		})
 	}
 }
 
@@ -208,7 +226,7 @@ func TestEmptyTokenRefusesWithoutRequest(t *testing.T) {
 		if requests != 0 || len(commands) != 0 {
 			t.Fatalf("token %q: %d requests, commands %v", token, requests, commands)
 		}
-		if s := r.source.Status(); s.State != "refused" {
+		if s := r.source.Status(party.Mode); s.State != "refused" {
 			t.Fatalf("status %+v", s)
 		}
 	}
@@ -223,7 +241,7 @@ func TestRejectedTokenStopsPolling(t *testing.T) {
 	if requests != 1 || len(commands) != 0 || len(waits) != 0 {
 		t.Fatalf("%d requests, commands %v, waits %v after 401", requests, commands, waits)
 	}
-	if s := r.source.Status(); s.State != "refused" {
+	if s := r.source.Status(party.Mode); s.State != "refused" {
 		t.Fatalf("status %+v", s)
 	}
 }
@@ -233,16 +251,16 @@ func TestManualModeDoesNotPoll(t *testing.T) {
 	r.hold = true
 	done := make(chan error, 1)
 	go func() { done <- r.source.Run(r.ctx) }()
-	eventually(t, func() bool { return r.source.Status().State == "idle" })
+	eventually(t, func() bool { return r.source.Status(party.Mode).State == "idle" })
 	time.Sleep(20 * time.Millisecond)
 	if _, _, requests := r.snapshot(); requests != 0 {
 		t.Fatalf("manual mode polled %d times", requests)
 	}
-	r.source.SetActive(true)
+	r.source.Follow(party.Mode)
 	eventually(t, func() bool { _, w, _ := r.snapshot(); return len(w) == 1 })
-	r.source.SetActive(false)
-	eventually(t, func() bool { return r.source.Status().State == "idle" })
-	r.source.SetActive(true)
+	r.source.Follow("manual")
+	eventually(t, func() bool { return r.source.Status(party.Mode).State == "idle" })
+	r.source.Follow(party.Mode)
 	eventually(t, func() bool { _, w, _ := r.snapshot(); return len(w) == 2 })
 	r.cancel()
 	if e := <-done; e != nil {
@@ -257,8 +275,83 @@ func TestManualModeDoesNotPoll(t *testing.T) {
 
 func TestUnconfiguredSourceReportsItself(t *testing.T) {
 	var s *Source
-	s.SetActive(true)
-	if st := s.Status(); st.State != "unconfigured" || st.Summary != "no Home Assistant source configured" {
-		t.Fatalf("status %+v", st)
+	s.Follow(party.Mode)
+	for _, mode := range []string{party.Mode, lightshow.Mode} {
+		if st := s.Status(mode); st.State != "unconfigured" || st.Summary != "no Home Assistant source configured" {
+			t.Fatalf("status %+v", st)
+		}
 	}
+}
+
+func TestASwitchBetweenTargetsPollsOnlyTheSelectedEntity(t *testing.T) {
+	r := newRig(t, "example-token", reply{state: "3"}, reply{state: "on"})
+	r.hold = true
+	done := make(chan error, 1)
+	go func() { done <- r.source.Run(r.ctx) }()
+	r.source.Follow(party.Mode)
+	eventually(t, func() bool { _, w, _ := r.snapshot(); return len(w) == 1 })
+	r.source.Follow(lightshow.Mode)
+	eventually(t, func() bool { _, w, _ := r.snapshot(); return len(w) == 2 })
+	if s := r.source.Status(party.Mode); s.State != "idle" || s.Summary != "not selected; Home Assistant not polled" {
+		t.Fatalf("Follow Party after the switch: %+v", s)
+	}
+	if s := r.source.Status(lightshow.Mode); s.State != "polling" || s.Value != "on" || !strings.Contains(s.Summary, lightshow.Entity+" is on (party)") {
+		t.Fatalf("Follow Lightshow after the switch: %+v", s)
+	}
+	r.cancel()
+	if e := <-done; e != nil {
+		t.Fatal(e)
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if want := []string{"/api/states/" + party.Entity, "/api/states/" + lightshow.Entity}; !reflect.DeepEqual(r.paths, want) {
+		t.Fatalf("requests %v, want %v", r.paths, want)
+	}
+	// The first reading after the switch is applied even though the party state is unchanged.
+	if !reflect.DeepEqual(r.commands, []string{"party-on", "party-on"}) || !reflect.DeepEqual(r.modes, []string{party.Mode, lightshow.Mode}) {
+		t.Fatalf("commands %v for %v", r.commands, r.modes)
+	}
+	for _, want := range []string{"Follow Party: polling Home Assistant sensor.house_mode_code every 5s", "Follow Party: not selected; stopped polling sensor.house_mode_code", "Follow Lightshow: polling Home Assistant binary_sensor.engine_visualizer every 5s", `Follow Lightshow: binary_sensor.engine_visualizer is "on"; sent party-on`} {
+		if !slices.Contains(r.logs, want) {
+			t.Errorf("no log line %q in %q", want, r.logs)
+		}
+	}
+}
+
+func TestARejectedTokenStopsPollingForEveryTarget(t *testing.T) {
+	r := newRig(t, "example-token", reply{code: 403}, reply{state: "on"})
+	if e := r.run(); e == nil {
+		t.Fatal("a rejected token kept polling")
+	}
+	r.source.Follow(lightshow.Mode)
+	time.Sleep(20 * time.Millisecond)
+	if _, _, requests := r.snapshot(); requests != 1 {
+		t.Fatalf("%d requests: Follow Lightshow sent the rejected token again", requests)
+	}
+	for _, mode := range []string{party.Mode, lightshow.Mode} {
+		if s := r.source.Status(mode); s.State != "refused" || !strings.HasPrefix(s.Summary, "not polling: Home Assistant rejected the token") {
+			t.Fatalf("%s: %+v", mode, s)
+		}
+	}
+	if !slices.Contains(r.logs, "Follow Party and Follow Lightshow: not polling Home Assistant: Home Assistant rejected the token (403 Forbidden); fix the token file and restart the controller") {
+		t.Fatalf("logs %q", r.logs)
+	}
+}
+
+func TestAModeWithoutATargetPollsNothing(t *testing.T) {
+	r := newRig(t, "example-token", reply{state: "on"})
+	r.source.config.Targets = []Target{party}
+	r.hold = true
+	done := make(chan error, 1)
+	go func() { done <- r.source.Run(r.ctx) }()
+	r.source.Follow(lightshow.Mode)
+	time.Sleep(20 * time.Millisecond)
+	if _, _, requests := r.snapshot(); requests != 0 {
+		t.Fatalf("Follow Lightshow without an entity polled %d times", requests)
+	}
+	if s := r.source.Status(lightshow.Mode); s.State != "unconfigured" || s.Summary != Unconfigured {
+		t.Fatalf("status %+v", s)
+	}
+	r.cancel()
+	<-done
 }

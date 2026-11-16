@@ -31,10 +31,11 @@ const (
 )
 
 type statusView struct {
-	Version     string             `json:"version"`
-	State       lifecycle.Status   `json:"state"`
-	Diagnostics worker.Diagnostics `json:"diagnostics"`
-	FollowParty partysource.Status `json:"followParty"`
+	Version         string             `json:"version"`
+	State           lifecycle.Status   `json:"state"`
+	Diagnostics     worker.Diagnostics `json:"diagnostics"`
+	FollowParty     partysource.Status `json:"followParty"`
+	FollowLightshow partysource.Status `json:"followLightshow"`
 }
 
 func main() {
@@ -70,14 +71,19 @@ func run(args []string) error {
 		if e != nil {
 			return e
 		}
-		follow := partysource.Unconfigured
-		if c.HomeAssistantURL != "" {
+		source := followSource(c, nil, nil)
+		if source != nil {
 			if _, e = partysource.ReadToken(c.HomeAssistantTokenFile); e != nil {
 				return e
 			}
-			follow = "polls Home Assistant " + c.PartyEntity
 		}
-		fmt.Printf("Configuration valid; worker %s; Follow Party: %s; no processes started\n", filepath.Base(c.WorkerScript), follow)
+		follows := func(mode string) string {
+			if st := source.Status(mode); st.State != "unconfigured" {
+				return "polls Home Assistant " + st.Entity
+			}
+			return partysource.Unconfigured
+		}
+		fmt.Printf("Configuration valid; worker %s; Follow Party: %s; Follow Lightshow: %s; no processes started\n", filepath.Base(c.WorkerScript), follows("follow-party"), follows("follow-lightshow"))
 		return nil
 	case "status":
 		return invoke(*root, "")
@@ -94,15 +100,15 @@ func run(args []string) error {
 		if s.State.Reason != "" {
 			fmt.Println(s.State.Reason)
 		}
-		for _, line := range diagnosticLines(s.Diagnostics, s.FollowParty) {
+		for _, line := range diagnosticLines(s.Diagnostics, s.FollowParty, s.FollowLightshow) {
 			fmt.Println(line)
 		}
 		return nil
 	case "start", "stop", "show", "quit":
 		return invoke(*root, a[0])
 	case "mode":
-		if len(a) != 2 || (a[1] != "manual" && a[1] != "follow-party") {
-			return fmt.Errorf("mode requires manual or follow-party")
+		if len(a) != 2 || (a[1] != "manual" && !lifecycle.Follows(a[1])) {
+			return fmt.Errorf("mode requires manual, follow-party or follow-lightshow")
 		}
 		return invoke(*root, a[1])
 	case "party":
@@ -111,7 +117,7 @@ func run(args []string) error {
 		}
 		return invoke(*root, "party-"+a[1])
 	default:
-		return fmt.Errorf("commands: app, menu, start, stop, status --json, diagnostics, show, mode manual|follow-party, party on|off, quit, check, version")
+		return fmt.Errorf("commands: app, menu, start, stop, status --json, diagnostics, show, mode manual|follow-party|follow-lightshow, party on|off, quit, check, version")
 	}
 }
 func invoke(root, command string) error {
@@ -125,7 +131,7 @@ func invoke(root, command string) error {
 func menu(root string) error {
 	in := bufio.NewScanner(os.Stdin)
 	for {
-		fmt.Fprintln(os.Stderr, "\nParty Visuals\n1 Start visuals\n2 Stop visuals\n3 Status / diagnostics\n4 Open Music Assistant controls\n5 Manual mode\n6 Follow Party (Start enables following)\n0 Close menu\nClosing this menu leaves visuals running.")
+		fmt.Fprintln(os.Stderr, "\nParty Visuals\n1 Start visuals\n2 Stop visuals\n3 Status / diagnostics\n4 Open Music Assistant controls\n5 Manual mode\n6 Follow Party (Start enables following)\n7 Follow Lightshow (Start enables following)\n0 Close menu\nClosing this menu leaves visuals running.")
 		if !in.Scan() {
 			return in.Err()
 		}
@@ -144,6 +150,8 @@ func menu(root string) error {
 			command = "manual"
 		case "6":
 			command = "follow-party"
+		case "7":
+			command = "follow-lightshow"
 		default:
 			continue
 		}
@@ -198,10 +206,7 @@ func notStarted(root string, e error) error {
 func serve(root string, c worker.Config, logger *controllerLog) error {
 	var e error
 	var m *lifecycle.Manager
-	var source *partysource.Source
-	if c.HomeAssistantURL != "" {
-		source = partysource.New(partysource.Config{URL: c.HomeAssistantURL, TokenFile: c.HomeAssistantTokenFile, Entity: c.PartyEntity, Value: c.PartyValue, Poll: time.Duration(c.PartyPollMs) * time.Millisecond}, func(command string) error { return m.Apply(command) }, logger.Printf)
-	}
+	source := followSource(c, func(mode, command string) error { return m.Event(mode, command) }, logger.Printf)
 	var eventMu sync.Mutex
 	var eventGeneration uint64
 	var t tray.Tray
@@ -213,7 +218,7 @@ func serve(root string, c worker.Config, logger *controllerLog) error {
 		diagMu.Lock()
 		d := diag
 		diagMu.Unlock()
-		return statusView{version, m.Snapshot(), d, source.Status()}
+		return statusView{version, m.Snapshot(), d, source.Status("follow-party"), source.Status("follow-lightshow")}
 	}
 	refresh := func(s lifecycle.Status) {
 		if t == nil {
@@ -223,11 +228,7 @@ func serve(root string, c worker.Config, logger *controllerLog) error {
 		d := diag
 		diagMu.Unlock()
 		t.SetTooltip("Party Visuals · " + s.Phase)
-		items := []tray.Item{{Title: "Party Visuals · " + s.Phase, Disabled: true}, {Title: s.Reason, Disabled: true}, {ID: "start", Title: "Start visuals", Disabled: s.Phase == "starting" || s.Phase == "running"}, {ID: "stop", Title: "Stop visuals"}, {Separator: true}}
-		for _, line := range diagnosticLines(d, source.Status()) {
-			items = append(items, tray.Item{Title: line, Disabled: true})
-		}
-		t.SetMenu(append(items, tray.Item{ID: "show", Title: "Open Music Assistant controls"}, tray.Item{ID: "diagnostics", Title: "Diagnostics / interactive menu"}, tray.Item{Separator: true}, tray.Item{ID: "manual", Title: "Manual", Checked: s.Intent.Mode == "manual"}, tray.Item{ID: "follow-party", Title: "Follow Party", Checked: s.Intent.Mode == "follow-party"}, tray.Item{ID: "quit", Title: "Stop visuals and quit"}))
+		t.SetMenu(trayItems(s, diagnosticLines(d, source.Status("follow-party"), source.Status("follow-lightshow"))))
 	}
 	command := func(command string) error {
 		switch command {
@@ -296,7 +297,7 @@ func serve(root string, c worker.Config, logger *controllerLog) error {
 	var backend *worker.Backend
 	var power *partysource.Power
 	if c.DisplayPowerEntity != "" {
-		power = partysource.NewPower(partysource.Config{URL: c.HomeAssistantURL, TokenFile: c.HomeAssistantTokenFile, Entity: c.DisplayPowerEntity, Poll: time.Duration(c.PartyPollMs) * time.Millisecond}, logger.Printf, func() {
+		power = partysource.NewPower(partysource.Config{URL: c.HomeAssistantURL, TokenFile: c.HomeAssistantTokenFile, Poll: time.Duration(c.PartyPollMs) * time.Millisecond}, c.DisplayPowerEntity, logger.Printf, func() {
 			if m.Snapshot().Phase == "running" && backend.Placement().Stale(power.Reading()) {
 				logger.Printf("Display power: %s settled at %s; reopening the visuals", c.DisplayPowerEntity, power.Reading())
 				systemEvent("display-change")
@@ -306,7 +307,7 @@ func serve(root string, c worker.Config, logger *controllerLog) error {
 	backend = &worker.Backend{Config: c, ConfigPath: filepath.Join(root, "config.json"), Notice: notice, Power: power.Reading, Placed: func(p worker.Placement) { logger.Printf("visuals open on %s", p.Text) }}
 	m, _, e = startManager(ctx, root, backend, func(s lifecycle.Status) {
 		logger.state(s)
-		source.SetActive(s.Intent.Mode == "follow-party")
+		source.Follow(s.Intent.Mode)
 		refresh(s)
 	}, signInSweepEvery, signInSweep)
 	if e != nil {
@@ -320,7 +321,7 @@ func serve(root string, c worker.Config, logger *controllerLog) error {
 	defer server.Close()
 	refresh(m.Snapshot())
 	if source != nil {
-		source.SetActive(m.Snapshot().Intent.Mode == "follow-party")
+		source.Follow(m.Snapshot().Intent.Mode)
 		go source.Run(ctx)
 	}
 	if power != nil {
@@ -403,8 +404,29 @@ func startManager(ctx context.Context, root string, backend lifecycle.Backend, c
 	return m, ended, nil
 }
 
-func diagnosticLines(d worker.Diagnostics, p partysource.Status) []string {
-	lines := []string{"Screen: " + d.Screen, "Audio: " + d.Audio, "OpenRGB: " + d.OpenRGB, "Follow Party: " + p.Summary}
+// followSource is the one Home Assistant poller of both follow modes; nil
+// without homeAssistantUrl, and Follow Lightshow only with lightshowEntity.
+func followSource(c worker.Config, event func(mode, command string) error, logf func(string, ...any)) *partysource.Source {
+	if c.HomeAssistantURL == "" {
+		return nil
+	}
+	targets := []partysource.Target{{Mode: "follow-party", Name: "Follow Party", Entity: c.PartyEntity, Value: c.PartyValue}}
+	if c.LightshowEntity != "" {
+		targets = append(targets, partysource.Target{Mode: "follow-lightshow", Name: "Follow Lightshow", Entity: c.LightshowEntity, Value: c.LightshowValue})
+	}
+	return partysource.New(partysource.Config{URL: c.HomeAssistantURL, TokenFile: c.HomeAssistantTokenFile, Poll: time.Duration(c.PartyPollMs) * time.Millisecond, Targets: targets}, event, logf)
+}
+
+func trayItems(s lifecycle.Status, lines []string) []tray.Item {
+	items := []tray.Item{{Title: "Party Visuals · " + s.Phase, Disabled: true}, {Title: s.Reason, Disabled: true}, {ID: "start", Title: "Start visuals", Disabled: s.Phase == "starting" || s.Phase == "running"}, {ID: "stop", Title: "Stop visuals"}, {Separator: true}}
+	for _, line := range lines {
+		items = append(items, tray.Item{Title: line, Disabled: true})
+	}
+	return append(items, tray.Item{ID: "show", Title: "Open Music Assistant controls"}, tray.Item{ID: "diagnostics", Title: "Diagnostics / interactive menu"}, tray.Item{Separator: true}, tray.Item{ID: "manual", Title: "Manual", Checked: s.Intent.Mode == "manual"}, tray.Item{ID: "follow-party", Title: "Follow Party", Checked: s.Intent.Mode == "follow-party"}, tray.Item{ID: "follow-lightshow", Title: "Follow Lightshow", Checked: s.Intent.Mode == "follow-lightshow"}, tray.Item{ID: "quit", Title: "Stop visuals and quit"})
+}
+
+func diagnosticLines(d worker.Diagnostics, party, lightshow partysource.Status) []string {
+	lines := []string{"Screen: " + d.Screen, "Audio: " + d.Audio, "OpenRGB: " + d.OpenRGB, "Follow Party: " + party.Summary, "Follow Lightshow: " + lightshow.Summary}
 	if d.Display != "" {
 		lines = append(lines, "Display: "+d.Display)
 	}

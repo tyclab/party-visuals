@@ -69,7 +69,7 @@ func stdout(t *testing.T, f func() error) (string, error) {
 
 func TestCheckValidatesTheHomeAssistantTokenFile(t *testing.T) {
 	out, e := stdout(t, func() error { return run([]string{"--root", writeRoot(t, nil), "check"}) })
-	if e != nil || !strings.Contains(out, "Follow Party: no Home Assistant source configured") {
+	if e != nil || !strings.Contains(out, "Follow Party: no Home Assistant source configured; Follow Lightshow: no Home Assistant source configured;") {
 		t.Fatalf("unconfigured check: %q, %v", out, e)
 	}
 	token := filepath.Join(t.TempDir(), "ha.token")
@@ -84,8 +84,13 @@ func TestCheckValidatesTheHomeAssistantTokenFile(t *testing.T) {
 	}
 	os.WriteFile(token, []byte("example-token\n"), 0600)
 	out, e = stdout(t, func() error { return run([]string{"--root", root, "check"}) })
-	if e != nil || !strings.Contains(out, "sensor.house_mode_code") || strings.Contains(out, "example-token") {
+	if e != nil || !strings.Contains(out, "Follow Party: polls Home Assistant sensor.house_mode_code; Follow Lightshow: no Home Assistant source configured;") || strings.Contains(out, "example-token") {
 		t.Fatalf("configured check: %q, %v", out, e)
+	}
+	root = writeRoot(t, map[string]any{"homeAssistantUrl": "https://ha.example.invalid", "homeAssistantTokenFile": token, "lightshowEntity": "binary_sensor.engine_visualizer"})
+	out, e = stdout(t, func() error { return run([]string{"--root", root, "check"}) })
+	if e != nil || !strings.Contains(out, "Follow Party: polls Home Assistant sensor.house_mode_code; Follow Lightshow: polls Home Assistant binary_sensor.engine_visualizer;") {
+		t.Fatalf("check with Follow Lightshow: %q, %v", out, e)
 	}
 }
 
@@ -99,24 +104,81 @@ func TestCheckRefusesAWorkerScriptOutsideTheReleaseFolder(t *testing.T) {
 	}
 }
 
-func TestDiagnosticsNameTheFollowPartySource(t *testing.T) {
+func TestDiagnosticsNameBothFollowSources(t *testing.T) {
 	root := t.TempDir()
+	token := filepath.Join(t.TempDir(), "ha.token")
 	var source *partysource.Source
 	server, e := owner.Listen(root, func() any {
-		return statusView{Version: "test", State: lifecycle.Status{Phase: "waiting-for-party"}, Diagnostics: worker.Diagnostics{Screen: "ready", Audio: "unknown", OpenRGB: "unavailable"}, FollowParty: source.Status()}
+		return statusView{Version: "test", State: lifecycle.Status{Phase: "waiting-for-party", Intent: lifecycle.Intent{Mode: "follow-lightshow"}}, Diagnostics: worker.Diagnostics{Screen: "ready", Audio: "unknown", OpenRGB: "unavailable"}, FollowParty: source.Status("follow-party"), FollowLightshow: source.Status("follow-lightshow")}
 	}, func(string) error { return nil })
 	if e != nil {
 		t.Fatal(e)
 	}
 	defer server.Close()
 	out, e := stdout(t, func() error { return run([]string{"--root", root, "diagnostics"}) })
-	if e != nil || !strings.Contains(out, "Follow Party: no Home Assistant source configured\n") || !strings.Contains(out, "waiting-for-party") {
+	if e != nil || !strings.Contains(out, "Follow Party: no Home Assistant source configured\nFollow Lightshow: no Home Assistant source configured\n") || !strings.Contains(out, "waiting-for-party") {
 		t.Fatalf("diagnostics: %q, %v", out, e)
 	}
 	out, e = stdout(t, func() error { return run([]string{"--root", root, "status", "--json"}) })
 	var s statusView
-	if e != nil || json.Unmarshal([]byte(out), &s) != nil || s.FollowParty.State != "unconfigured" {
+	if e != nil || json.Unmarshal([]byte(out), &s) != nil || s.FollowParty.State != "unconfigured" || s.FollowLightshow.State != "unconfigured" || s.State.Intent.Mode != "follow-lightshow" {
 		t.Fatalf("status --json: %q, %v", out, e)
+	}
+	c := worker.Config{HomeAssistantURL: "https://ha.example.invalid", HomeAssistantTokenFile: token, PartyEntity: "sensor.house_mode_code", PartyValue: "3", PartyPollMs: 5000}
+	source = followSource(c, nil, nil)
+	out, _ = stdout(t, func() error { return run([]string{"--root", root, "diagnostics"}) })
+	if !strings.Contains(out, "Follow Party: not selected; Home Assistant not polled\nFollow Lightshow: no Home Assistant source configured\n") {
+		t.Fatalf("diagnostics without a Follow Lightshow entity: %q", out)
+	}
+	c.LightshowEntity, c.LightshowValue = "binary_sensor.engine_visualizer", "on"
+	source = followSource(c, nil, nil)
+	out, _ = stdout(t, func() error { return run([]string{"--root", root, "status", "--json"}) })
+	if json.Unmarshal([]byte(out), &s) != nil || s.FollowLightshow.State != "idle" || s.FollowLightshow.Entity != "binary_sensor.engine_visualizer" || s.FollowParty.Entity != "sensor.house_mode_code" {
+		t.Fatalf("status --json with both sources: %q", out)
+	}
+}
+
+func TestTheTrayOffersAndChecksEachMode(t *testing.T) {
+	for _, mode := range []string{"manual", "follow-party", "follow-lightshow"} {
+		var checked []string
+		ids := map[string]bool{}
+		for _, item := range trayItems(lifecycle.Status{Phase: "off", Intent: lifecycle.Intent{Mode: mode}}, nil) {
+			ids[item.ID] = true
+			if item.Checked {
+				checked = append(checked, item.ID)
+			}
+		}
+		if len(checked) != 1 || checked[0] != mode || !ids["manual"] || !ids["follow-party"] || !ids["follow-lightshow"] {
+			t.Fatalf("in %s the tray checks %v of %v", mode, checked, ids)
+		}
+	}
+}
+
+func TestTheInteractiveMenuSendsEachMode(t *testing.T) {
+	root := t.TempDir()
+	var mu sync.Mutex
+	var got []string
+	server, e := owner.Listen(root, func() any { return statusView{} }, func(c string) error { mu.Lock(); got = append(got, c); mu.Unlock(); return nil })
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer server.Close()
+	r, w, _ := os.Pipe()
+	null, e := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	if e != nil {
+		t.Fatal(e)
+	}
+	defer null.Close()
+	saved, savedErr := os.Stdin, os.Stderr
+	os.Stdin, os.Stderr = r, null
+	defer func() { os.Stdin, os.Stderr = saved, savedErr }()
+	w.WriteString("5\n6\n7\n0\n")
+	w.Close()
+	if _, e = stdout(t, func() error { return menu(root) }); e != nil {
+		t.Fatal(e)
+	}
+	if want := []string{"manual", "follow-party", "follow-lightshow"}; strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("the menu sent %v, want %v", got, want)
 	}
 }
 
@@ -165,7 +227,7 @@ func TestRestoredWindowNoticesLandInControllerLogAndDiagnostics(t *testing.T) {
 		t.Fatal(e)
 	}
 	l := &controllerLog{Logger: log.New(f, "", log.LstdFlags)}
-	if lines := diagnosticLines(worker.Diagnostics{Browser: l.browserNote()}, partysource.Status{}); strings.HasPrefix(lines[len(lines)-1], "Browser:") {
+	if lines := diagnosticLines(worker.Diagnostics{Browser: l.browserNote()}, partysource.Status{}, partysource.Status{}); strings.HasPrefix(lines[len(lines)-1], "Browser:") {
 		t.Fatal("a Browser line without a restored window")
 	}
 	open := strings.TrimSuffix(lifecycle.ErrRestoredOpen.Error(), ".") + " (process 41: access denied)"
@@ -182,7 +244,7 @@ func TestRestoredWindowNoticesLandInControllerLogAndDiagnostics(t *testing.T) {
 			t.Errorf("controller.log lacks one %q:\n%s", want, b)
 		}
 	}
-	lines := diagnosticLines(worker.Diagnostics{Browser: l.browserNote()}, partysource.Status{})
+	lines := diagnosticLines(worker.Diagnostics{Browser: l.browserNote()}, partysource.Status{}, partysource.Status{})
 	if last := lines[len(lines)-1]; !strings.HasPrefix(last, "Browser: A browser window restored by Windows at sign-in was closed (process 42) at ") {
 		t.Fatalf("diagnostics end with %q", last)
 	}
@@ -199,7 +261,7 @@ func TestCommandsAndStatesLandInControllerLog(t *testing.T) {
 		switch c {
 		case "party-on":
 			return errors.New("controller is shutting down")
-		case "start", "stop", "follow-party", "quit":
+		case "start", "stop", "follow-party", "follow-lightshow", "quit":
 			return nil
 		}
 		return errors.New("unknown controller command")
@@ -212,10 +274,13 @@ func TestCommandsAndStatesLandInControllerLog(t *testing.T) {
 	if e = l.command("tray", apply)("start"); e != nil {
 		t.Fatal(e)
 	}
-	for _, args := range [][]string{{"stop"}, {"mode", "follow-party"}, {"quit"}} {
+	for _, args := range [][]string{{"stop"}, {"mode", "follow-party"}, {"mode", "follow-lightshow"}, {"quit"}} {
 		if _, e = stdout(t, func() error { return run(append([]string{"--root", root}, args...)) }); e != nil {
 			t.Fatal(e)
 		}
+	}
+	if _, e = stdout(t, func() error { return run([]string{"--root", root, "mode", "follow-something"}) }); e == nil || e.Error() != "mode requires manual, follow-party or follow-lightshow" {
+		t.Fatalf("an unknown mode: %v", e)
 	}
 	if _, e = stdout(t, func() error { return run([]string{"--root", root, "party", "on"}) }); e == nil {
 		t.Fatal("refused command reported success")
@@ -229,17 +294,20 @@ func TestCommandsAndStatesLandInControllerLog(t *testing.T) {
 	refused := off
 	refused.Phase, refused.Reason = "attention", lifecycle.ErrRestoredOpen.Error()
 	l.state(refused)
+	l.state(lifecycle.Status{Phase: "waiting-for-party", Intent: lifecycle.Intent{Version: 1, Mode: "follow-lightshow", Requested: true}})
 	f.Close()
 	b := readLog(t, root)
 	for _, want := range []string{
 		`command "start" from tray: accepted` + "\n",
 		`command "stop" from cli: accepted` + "\n",
 		`command "follow-party" from cli: accepted` + "\n",
+		`command "follow-lightshow" from cli: accepted` + "\n",
 		`command "quit" from cli: accepted` + "\n",
 		`command "party-on" from cli: refused: controller is shutting down` + "\n",
 		`command "start\nphase running (mode manual, Start requested)" from cli: refused: unknown controller command` + "\n",
 		"phase off (mode manual, Manual Off)\n",
 		"phase attention (mode manual, Manual Off): A browser window restored by Windows at sign-in is open; close it before Start.\n",
+		"phase waiting-for-party (mode follow-lightshow, Start requested)\n",
 	} {
 		if strings.Count(b, want) != 1 {
 			t.Errorf("controller.log lacks one %q:\n%s", want, b)
@@ -321,7 +389,7 @@ func TestAfterTheSignInWindowOnlyStartSweeps(t *testing.T) {
 	}
 	settled := func() bool { p := m.Snapshot().Phase; return p != "starting" && p != "stopping" }
 	b.restore()
-	for _, c := range []string{"restore", "stop", "follow-party", "manual"} {
+	for _, c := range []string{"restore", "stop", "follow-party", "follow-lightshow", "manual"} {
 		m.Apply(c)
 		eventually(t, settled)
 	}
