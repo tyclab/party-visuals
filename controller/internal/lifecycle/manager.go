@@ -149,8 +149,8 @@ func (m *Manager) apply(command, reason string, expectedGeneration uint64, forMo
 		m.mu.Unlock()
 		return errors.New("controller is shutting down")
 	}
-	next := m.state
-	previousWant := next.Intent.Requested && !next.Intent.ManualOff && !next.Suspended && (next.Intent.Mode == "manual" || next.Party)
+	next, by := m.state, m.partyBy
+	previousWant := m.wants(next)
 	var persistenceError error
 	switch command {
 	case "start":
@@ -199,12 +199,12 @@ func (m *Manager) apply(command, reason string, expectedGeneration uint64, forMo
 		}
 	}
 	next.Reason = reason
-	if next == m.state && command != "restore" && !(command == "start" && m.state.Phase == "attention") {
+	if next == m.state && m.partyBy == by && command != "restore" && !(command == "start" && m.state.Phase == "attention") {
 		m.mu.Unlock()
 		return persistenceError
 	}
 	m.state = next
-	want := next.Intent.Requested && !next.Intent.ManualOff && !next.Suspended && (next.Intent.Mode == "manual" || next.Party)
+	want := m.wants(next)
 	if want && previousWant && (m.state.Phase == "running" || m.state.Phase == "starting") {
 		m.seq++
 		s, seq := m.state, m.seq
@@ -230,6 +230,17 @@ func (m *Manager) apply(command, reason string, expectedGeneration uint64, forMo
 	m.mu.Unlock()
 	m.notify(s, seq)
 	return persistenceError
+}
+
+// wants reports whether s calls for visuals. A party state the other follow
+// mode's source set only keeps a session that runs or starts, until this
+// mode's first reading; it never starts one. Callers hold mu.
+func (m *Manager) wants(s Status) bool {
+	if !s.Intent.Requested || s.Intent.ManualOff || s.Suspended {
+		return false
+	}
+	own := m.partyBy == "" || m.partyBy == s.Intent.Mode
+	return s.Intent.Mode == "manual" || s.Party && (own || s.Phase == "running" || s.Phase == "starting")
 }
 
 // CloseRestored closes windows Windows restored at sign-in while no session is
