@@ -116,6 +116,21 @@ try {
     Rollback-Controller $journal
     $loaded=Get-Content -LiteralPath $path -Raw|ConvertFrom-Json
     Check 'rollback restores definitions disabled and preserves current Off' (($script:events -join ',') -eq 'restore,disabled' -and $loaded.manualOff -and -not $loaded.requested -and $journal.phase -eq 'rolled-back-off')
+    $startup = Join-Path $sandbox 'startup'
+    New-Item -ItemType Directory -Path $startup -Force | Out-Null
+    $legacyBrowser = Join-Path $startup 'Start-PartyVisualsBrowser.ps1'
+    $legacyNode = Join-Path $startup 'Start-PartyVisualsNodecg.ps1'
+    Copy-Item (Join-Path $PSScriptRoot '..\install\Start-PartyVisualsBrowser.ps1') $legacyBrowser
+    Copy-Item (Join-Path $PSScriptRoot '..\install\Start-PartyVisualsNodecg.ps1') $legacyNode
+    function Get-ScheduledTask($TaskName) {
+        if ($TaskName -eq 'PartyVisuals NodeCG') { $file, $more = $legacyNode, '' } else { $file, $more = $legacyBrowser, $script:legacyArgs }
+        [pscustomobject]@{ TaskName = $TaskName; Actions = @([pscustomobject]@{ Execute = 'powershell.exe'; Arguments = ('-NoProfile -File "' + $file + '"' + $more) }) }
+    }
+    $script:legacyArgs = ' -BrowserProfile "C:\dedicated profile" -PreferredDisplay "Big TV"'
+    $imported = Get-LegacyConfiguration
+    Check 'legacy import keeps the preferred display' ($imported.preferredDisplay -eq 'Big TV' -and $imported.browserProfile -eq 'C:\dedicated profile')
+    $script:legacyArgs = ' -BrowserProfile "C:\dedicated profile"'
+    Check 'legacy import without a preferred display adds no key an earlier release refuses' (-not (Get-LegacyConfiguration).ContainsKey('preferredDisplay'))
     Write-Host "Passed $script:checks controller installer checks. No real task was registered or stopped."
 } finally {
     Remove-Item -LiteralPath $sandbox -Recurse -Force

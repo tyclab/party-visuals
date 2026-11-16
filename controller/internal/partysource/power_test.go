@@ -58,7 +58,7 @@ func newPowerRig(t *testing.T, token string, replies ...reply) *powerRig {
 	fakeACL(t, grants(testUser), nil)
 	r.ctx, r.cancel = context.WithCancel(context.Background())
 	t.Cleanup(r.cancel)
-	r.power = NewPower(Config{URL: server.URL, TokenFile: file, Poll: 5 * time.Second}, "media_player.big_tv", r.logf, func() {
+	r.power = NewPower(New(Config{URL: server.URL, TokenFile: file, Poll: 5 * time.Second}, nil, r.logf), "media_player.big_tv", r.logf, func() {
 		r.mu.Lock()
 		defer r.mu.Unlock()
 		r.seen = append(r.seen, r.power.Reading())
@@ -175,17 +175,19 @@ func TestPowerIsUnknownUntilItsFirstReading(t *testing.T) {
 	}
 }
 
-func TestPowerStopsAtARejectedTokenAndKeepsItsReading(t *testing.T) {
-	r := newPowerRig(t, "example-token", reply{state: "on"}, reply{code: 403}, reply{state: "off"})
-	if e := r.run(); e == nil {
-		t.Fatal("rejected token kept polling")
-	}
-	_, _, requests := r.snapshot()
-	if requests != 2 || r.power.Reading() != "on" {
-		t.Fatalf("%d requests, reading %s", requests, r.power.Reading())
-	}
-	if s := r.power.Status(); s.State != "refused" || !strings.Contains(s.Summary, "not polling: Home Assistant rejected the token") {
-		t.Fatalf("status %+v", s)
+func TestPowerGoesByWindowsListAloneAfterARejectedToken(t *testing.T) {
+	for _, before := range []string{"on", "off"} {
+		r := newPowerRig(t, "example-token", reply{state: before}, reply{code: 403}, reply{state: "on"})
+		if e := r.run(); e == nil {
+			t.Fatal("rejected token kept polling")
+		}
+		_, _, requests := r.snapshot()
+		if requests != 2 || r.power.Reading() != "unknown" {
+			t.Fatalf("after %s: %d requests, reading %s", before, requests, r.power.Reading())
+		}
+		if s := r.power.Status(); s.State != "refused" || !strings.Contains(s.Summary, "not polling: Home Assistant rejected the token") {
+			t.Fatalf("status %+v", s)
+		}
 	}
 }
 

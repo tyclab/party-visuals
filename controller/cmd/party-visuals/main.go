@@ -296,13 +296,8 @@ func serve(root string, c worker.Config, logger *controllerLog) error {
 	}
 	var backend *worker.Backend
 	var power *partysource.Power
-	if c.DisplayPowerEntity != "" {
-		power = partysource.NewPower(partysource.Config{URL: c.HomeAssistantURL, TokenFile: c.HomeAssistantTokenFile, Poll: time.Duration(c.PartyPollMs) * time.Millisecond}, c.DisplayPowerEntity, logger.Printf, func() {
-			if m.Snapshot().Phase == "running" && backend.Placement().Stale(power.Reading()) {
-				logger.Printf("Display power: %s settled at %s; reopening the visuals", c.DisplayPowerEntity, power.Reading())
-				systemEvent("display-change")
-			}
-		})
+	if c.DisplayPowerEntity != "" && source != nil {
+		power = partysource.NewPower(source, c.DisplayPowerEntity, logger.Printf, reopenOnPower(c.DisplayPowerEntity, func() string { return m.Snapshot().Phase }, func() worker.Placement { return backend.Placement() }, func() string { return power.Reading() }, logger.Printf, systemEvent))
 	}
 	backend = &worker.Backend{Config: c, ConfigPath: filepath.Join(root, "config.json"), Notice: notice, Power: power.Reading, Placed: func(p worker.Placement) { logger.Printf("visuals open on %s", p.Text) }}
 	m, _, e = startManager(ctx, root, backend, func(s lifecycle.Status) {
@@ -402,6 +397,18 @@ func startManager(ctx context.Context, root string, backend lifecycle.Backend, c
 		}
 	}()
 	return m, ended, nil
+}
+
+// reopenOnPower returns what runs after each display power reading: running
+// visuals the settled reading would put on another screen reopen, by the same
+// path as a display change.
+func reopenOnPower(entity string, phase func() string, placement func() worker.Placement, reading func() string, logf func(string, ...any), event func(string)) func() {
+	return func() {
+		if now := reading(); phase() == "running" && placement().Stale(now) {
+			logf("Display power: %s settled at %s; reopening the visuals", entity, now)
+			event("display-change")
+		}
+	}
 }
 
 // followSource is the one Home Assistant poller of both follow modes; nil

@@ -165,7 +165,7 @@ function Select-VisualsScreen($Screens, [string] $Preferred, [ValidateSet('none'
     $all = @($Screens | Where-Object { $null -ne $_ })
     $ordered = @($all | Sort-Object @{ Expression = { [bool]$_.Primary } }, @{ Expression = { [int]$_.X } }, @{ Expression = { [int]$_.Y } })
     $named = @($ordered | Where-Object { @($_.Monitors) -contains $Preferred })
-    $placement = [pscustomobject]@{ Screen = $null; PreferredListed = $named.Count -gt 0; Reason = 'Windows listed no screen'; Position = $null; Size = $null }
+    $placement = [pscustomobject]@{ Screen = $null; PreferredListed = $named.Count -gt 0; Power = $Power; Reason = 'Windows listed no screen'; Position = $null; Size = $null }
     if ($all.Count -eq 0) { return $placement }
     if ($named.Count -and $Power -ne 'off') {
         $placement.Screen = $named[0]

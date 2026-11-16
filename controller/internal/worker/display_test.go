@@ -104,8 +104,8 @@ func TestPlacementIsStaleOnlyWhenOnOrOffChangesTheScreen(t *testing.T) {
 func TestDisplayEventRecordsThePlacementWithItsPowerReading(t *testing.T) {
 	var logged []Placement
 	b := &Backend{Placed: func(p Placement) { logged = append(logged, p) }}
-	b.place(Placement{Power: "off"})
-	b.event([]byte(`{"preferredListed":true,"event":"display","text":"\\\\.\\DISPLAY2 (Desk Monitor, 3840x1600 at 3840,0): the preferred display is off; first screen other than the primary"}`), "off")
+	b.place(Placement{Power: "on"})
+	b.event([]byte(`{"preferredListed":true,"power":"off","event":"display","text":"\\\\.\\DISPLAY2 (Desk Monitor, 3840x1600 at 3840,0): the preferred display is off; first screen other than the primary"}`))
 	want := Placement{Text: `\\.\DISPLAY2 (Desk Monitor, 3840x1600 at 3840,0): the preferred display is off; first screen other than the primary`, PreferredListed: true, Power: "off"}
 	if got := b.Placement(); got != want {
 		t.Fatalf("placement %+v", got)

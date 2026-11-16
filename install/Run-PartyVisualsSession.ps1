@@ -46,7 +46,7 @@ try {
     if ($listeners.Count) { throw 'NodeCG port is already in use outside this controller; no second instance was started.' }
     $nodecg = Start-NodecgProcess $log
     $browser = Open-VisualsBrowser $DisplayPower
-    if ($null -ne $VisualsPlacement) { [Console]::WriteLine((@{ event = 'display'; text = (Format-VisualsPlacement $VisualsPlacement); preferredListed = $VisualsPlacement.PreferredListed } | ConvertTo-Json -Compress)) }
+    if ($null -ne $VisualsPlacement) { [Console]::WriteLine((@{ event = 'display'; text = (Format-VisualsPlacement $VisualsPlacement); preferredListed = $VisualsPlacement.PreferredListed; power = $VisualsPlacement.Power } | ConvertTo-Json -Compress)) }
     $helper = Start-BrowserHelper
     [Console]::WriteLine('{"event":"ready"}')
     $inputLine = [Console]::In.ReadLineAsync()

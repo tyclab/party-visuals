@@ -87,7 +87,7 @@ func (b *Backend) Start(ctx context.Context) (lifecycle.Session, error) {
 		scan := bufio.NewScanner(out)
 		scan.Buffer(make([]byte, 4096), 65536)
 		for scan.Scan() {
-			switch event, reason := b.event(scan.Bytes(), power); event {
+			switch event, reason := b.event(scan.Bytes()); event {
 			case "ready":
 				ready <- nil
 			case "error":
@@ -130,19 +130,21 @@ func (b *Backend) Start(ctx context.Context) (lifecycle.Session, error) {
 	return s, nil
 }
 
-// event reads one worker line and records a display placement it reports.
-func (b *Backend) event(line []byte, power string) (event, reason string) {
+// event reads one worker line and records a display placement it reports,
+// with the power reading the worker chose the screen with.
+func (b *Backend) event(line []byte) (event, reason string) {
 	var v struct {
 		Event           string `json:"event"`
 		Reason          string `json:"reason"`
 		Text            string `json:"text"`
 		PreferredListed bool   `json:"preferredListed"`
+		Power           string `json:"power"`
 	}
 	if json.Unmarshal(line, &v) != nil {
 		return "", ""
 	}
 	if v.Event == "display" {
-		p := Placement{Text: v.Text, PreferredListed: v.PreferredListed, Power: power}
+		p := Placement{Text: v.Text, PreferredListed: v.PreferredListed, Power: v.Power}
 		b.place(p)
 		if b.Placed != nil {
 			b.Placed(p)

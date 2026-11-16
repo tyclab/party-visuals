@@ -47,6 +47,7 @@ $pick = Select-VisualsScreen $layout 'Big TV' 'unknown'
 Check 'an unknown power reading leaves the choice to the display list' ($pick.Screen.Device -eq '\\.\DISPLAY3' -and $pick.Reason -eq 'the preferred display is connected; its power is not known')
 $pick = Select-VisualsScreen $layout 'Big TV' 'off'
 Check 'a preferred display that is off gives way to a screen that is not the primary' ($pick.Screen.Device -eq '\\.\DISPLAY2' -and $pick.PreferredListed -and $pick.Reason -eq 'the preferred display is off; first screen other than the primary')
+Check 'the placement records the power reading it was chosen with' ($pick.Power -eq 'off' -and (Select-VisualsScreen $layout 'Big TV' 'none').Power -eq 'none')
 $pick = Select-VisualsScreen @($deskLeft, $deskRight) 'Big TV' 'on'
 Check 'a preferred display Windows does not list gives way to a screen that is not the primary' ($pick.Screen.Device -eq '\\.\DISPLAY2' -and -not $pick.PreferredListed -and $pick.Reason -eq 'the preferred display is not connected; first screen other than the primary')
 $farLeft = New-Screen '\\.\DISPLAY4' @('Side Monitor') -1920 0 1920 1080

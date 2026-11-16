@@ -63,6 +63,8 @@ type Source struct {
 	status  Status
 	of      string // the mode status describes
 	refusal string
+	req     sync.Mutex // one request at a time, so no reader sends a token Home Assistant just rejected
+	reject  error      // Home Assistant's rejection of the token; guarded by mu
 }
 
 // New returns a source that sends party-on or party-off with the mode it read
@@ -253,6 +255,14 @@ func (s *Source) refuse(e error) error {
 	return e
 }
 func (s *Source) read(ctx context.Context, token, entity string) (string, error) {
+	s.req.Lock()
+	defer s.req.Unlock()
+	s.mu.Lock()
+	rejected := s.reject
+	s.mu.Unlock()
+	if rejected != nil {
+		return "", rejected
+	}
 	r, e := http.NewRequestWithContext(ctx, "GET", strings.TrimRight(s.config.URL, "/")+"/api/states/"+url.PathEscape(entity), nil)
 	if e != nil {
 		return "", e
@@ -264,7 +274,11 @@ func (s *Source) read(ctx context.Context, token, entity string) (string, error)
 	}
 	defer res.Body.Close()
 	if res.StatusCode == http.StatusUnauthorized || res.StatusCode == http.StatusForbidden {
-		return "", fmt.Errorf("%w (%s); fix the token file and restart the controller", errRejected, res.Status)
+		e = fmt.Errorf("%w (%s); fix the token file and restart the controller", errRejected, res.Status)
+		s.mu.Lock()
+		s.reject, s.refusal = e, e.Error()
+		s.mu.Unlock()
+		return "", e
 	}
 	if res.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("Home Assistant answered %s", res.Status)

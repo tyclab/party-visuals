@@ -58,7 +58,8 @@ accepts loopback calls only, so the controller pulls: while Follow Party is
 selected it reads one entity (`GET /api/states/<entity>` with a bearer token)
 every `partyPollMs` and sends `party on` when the state equals `partyValue`,
 `party off` for any other state. It sends once per change, and once for the
-first reading after each switch to Follow Party. Manual mode polls nothing.
+first reading after each switch to Follow Party. Manual mode polls no follow
+entity (only `displayPowerEntity`, if set; see [Choosing the screen](#choosing-the-screen)).
 A reading is taken only while the mode it was read for is still selected, so
 one that arrives just after a switch changes nothing.
 A failed reading (error, timeout, `unavailable`, `unknown`) keeps the last
@@ -80,7 +81,7 @@ restart, and `party on|off` sets its state by hand until the entity changes.
 
 One poller serves both follow modes and reads only the selected mode's
 entity, so switching leaves no other entity polled, and a rejected token stops
-polling for both. A switch between Follow Party and Follow Lightshow starts
+polling for both, and the display power reading too. A switch between Follow Party and Follow Lightshow starts
 and stops nothing by itself: visuals that run or are starting carry on until
 the new mode's first reading, which is applied whatever it says, and
 otherwise nothing starts before that reading asks for it. Visuals carried on
@@ -165,8 +166,10 @@ Windows can keep listing a TV while it is off or in standby, so its list alone c
 say "on". `displayPowerEntity`, optional, names a Home Assistant entity that can: `off`
 and `standby` read as off, any other state as on. It takes `homeAssistantUrl` and
 `homeAssistantTokenFile` from Follow Party with their checks and rules: an empty token
-file sends nothing, and a 401/403 answer stops this reading until the controller
-restarts. The controller reads it every `partyPollMs` while it runs, in either mode.
+file sends nothing, and a 401/403 answer stops this reading and the follow modes'
+until the controller restarts: requests go one at a time, so Home Assistant sees the
+rejected token once. The controller reads it every `partyPollMs` while it runs, in
+every mode.
 The first reading counts at once; a change counts once it has held for 30 seconds,
 since such an entity can read off for a few seconds while the TV stays on. A failed
 reading keeps the last one. Until the first reading, and after a refused token, the

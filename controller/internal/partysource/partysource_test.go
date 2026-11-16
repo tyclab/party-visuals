@@ -56,7 +56,7 @@ func newRig(t *testing.T, token string, replies ...reply) *rig {
 		r.paths = append(r.paths, req.URL.Path)
 		r.mu.Unlock()
 		entity := strings.TrimPrefix(req.URL.Path, "/api/states/")
-		if (entity != party.Entity && entity != lightshow.Entity) || n >= len(replies) {
+		if (entity != party.Entity && entity != lightshow.Entity && entity != "media_player.big_tv") || n >= len(replies) {
 			http.NotFound(w, req)
 			return
 		}
@@ -416,4 +416,47 @@ func TestAModeWithoutATargetPollsNothing(t *testing.T) {
 	}
 	r.cancel()
 	<-done
+}
+
+func TestOneRejectionStopsTheFollowPollerAndTheDisplayPowerReader(t *testing.T) {
+	for _, order := range []string{"power first", "follow first", "together"} {
+		t.Run(order, func(t *testing.T) {
+			r := newRig(t, "example-token", reply{code: 401, wait: order == "together"}, reply{code: 401}, reply{state: "on"})
+			r.release = make(chan struct{})
+			r.hold = true
+			power := NewPower(r.source, "media_player.big_tv", r.logf, nil)
+			r.source.Follow(party.Mode)
+			runs := []func(context.Context) error{power.Run, r.source.Run}
+			if order == "follow first" {
+				runs[0], runs[1] = runs[1], runs[0]
+			}
+			errs := make(chan error, 2)
+			for _, run := range runs {
+				if order == "together" {
+					go func() { errs <- run(r.ctx) }()
+				} else {
+					errs <- run(r.ctx)
+				}
+			}
+			if order == "together" {
+				eventually(t, func() bool { _, _, n := r.snapshot(); return n == 1 })
+				time.Sleep(20 * time.Millisecond)
+				r.free()
+			}
+			for range runs {
+				if e := <-errs; e == nil {
+					t.Fatal("a reader kept polling after the rejection")
+				}
+			}
+			if _, _, n := r.snapshot(); n != 1 {
+				t.Fatalf("%d requests carried the rejected token", n)
+			}
+			if s := r.source.Status(party.Mode); s.State != "refused" {
+				t.Fatalf("Follow Party: %+v", s)
+			}
+			if s := power.Status(); s.State != "refused" || power.Reading() != "unknown" {
+				t.Fatalf("display power: %+v, reading %s", s, power.Reading())
+			}
+		})
+	}
 }

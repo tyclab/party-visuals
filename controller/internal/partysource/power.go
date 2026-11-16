@@ -27,8 +27,8 @@ type PowerStatus struct {
 const powerSettle = 30 * time.Second
 
 // Power reads whether the preferred display is on from a Home Assistant
-// entity, with Source's token file, ACL check and request, and its rules for
-// rejected tokens and failed readings.
+// entity through the follow modes' Source: its token file, ACL check and
+// request, and its rules for rejected tokens and failed readings.
 type Power struct {
 	src     *Source
 	entity  string
@@ -43,10 +43,10 @@ type Power struct {
 	status  PowerStatus
 }
 
-// NewPower returns a reader of entity that calls polled after each reading
-// attempt. It reads nothing before Run.
-func NewPower(c Config, entity string, logf func(string, ...any), polled func()) *Power {
-	p := &Power{src: New(c, nil, logf), entity: entity, logf: logf, polled: polled, after: time.After, now: time.Now, reading: "unknown"}
+// NewPower returns a reader of entity through src that calls polled after
+// each reading attempt. It reads nothing before Run.
+func NewPower(src *Source, entity string, logf func(string, ...any), polled func()) *Power {
+	p := &Power{src: src, entity: entity, logf: logf, polled: polled, after: time.After, now: time.Now, reading: "unknown"}
 	p.status = PowerStatus{State: "idle", Entity: entity, Reading: "unknown", Summary: "not read yet"}
 	return p
 }
@@ -143,9 +143,13 @@ func (p *Power) observe(entity, state string) {
 	}
 	p.status = PowerStatus{State: "polling", Entity: entity, Reading: p.reading, Raw: state, Checked: now.UTC(), Summary: summary}
 }
+
+// refuse stops reading for good, so the reading becomes unknown: the screen is
+// then chosen by Windows' list alone, never by a reading that can go stale.
 func (p *Power) refuse(e error) error {
 	p.logf("Display power: not polling Home Assistant: %v", e)
 	p.mu.Lock()
+	p.reading, p.pending = "unknown", ""
 	p.status = PowerStatus{State: "refused", Entity: p.entity, Reading: p.reading, Error: e.Error(), Summary: "not polling: " + e.Error()}
 	p.mu.Unlock()
 	return e

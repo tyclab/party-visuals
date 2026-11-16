@@ -87,13 +87,14 @@ function Test-ScreenPlacement($Target, $Screens) {
     try {
         $port = Wait-For 20 { $line = @(Get-Content -LiteralPath $portFile)[0]; if ($line -match '^\d+$') { [int]$line } }
         if ($null -eq $port) { return "FAIL $name`: Chrome wrote no DevTools port" }
-        $target = Wait-For 20 { @((Invoke-RestMethod "http://127.0.0.1:$port/json/list") | Where-Object { $_.type -in @('page', 'app') })[0] }
-        if ($null -eq $target) { return "FAIL $name`: Chrome showed no page" }
+        # PowerShell names ignore case: a variable called target here would replace the screen in Target.
+        $page = Wait-For 20 { @((Invoke-RestMethod "http://127.0.0.1:$port/json/list") | Where-Object { $_.type -in @('page', 'app') })[0] }
+        if ($null -eq $page) { return "FAIL $name`: Chrome showed no page" }
         $socket = New-Object Net.WebSockets.ClientWebSocket
         [void]$socket.ConnectAsync([uri](Invoke-RestMethod "http://127.0.0.1:$port/json/version").webSocketDebuggerUrl, [Threading.CancellationToken]::None).GetAwaiter().GetResult()
         $script:cdpId = 0
-        $bounds = Wait-For 10 { $b = (Invoke-Cdp $socket (++$script:cdpId) 'Browser.getWindowForTarget' @{ targetId = $target.id }).bounds; if ($b.windowState -eq 'fullscreen') { $b } }
-        if ($null -eq $bounds) { $bounds = (Invoke-Cdp $socket (++$script:cdpId) 'Browser.getWindowForTarget' @{ targetId = $target.id }).bounds }
+        $bounds = Wait-For 10 { $b = (Invoke-Cdp $socket (++$script:cdpId) 'Browser.getWindowForTarget' @{ targetId = $page.id }).bounds; if ($b.windowState -eq 'fullscreen') { $b } }
+        if ($null -eq $bounds) { $bounds = (Invoke-Cdp $socket (++$script:cdpId) 'Browser.getWindowForTarget' @{ targetId = $page.id }).bounds }
         $browser.Refresh()
         $monitor = Wait-For 10 { $browser.Refresh(); if ($browser.MainWindowHandle -ne [IntPtr]::Zero) { [PartyAcceptanceNative]::MonitorOf($browser.MainWindowHandle) } }
         $landed = '{0} at {1},{2} {3}x{4} on {5}' -f $bounds.windowState, $bounds.left, $bounds.top, $bounds.width, $bounds.height, $monitor
