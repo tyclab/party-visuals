@@ -782,8 +782,8 @@ func TestStopWhileOffPublishesAndSweepsNothing(t *testing.T) {
 		t.Fatal(e)
 	}
 	m.Apply("restore")
-	// Restore publishes stopping and off, in either order.
-	eventually(t, func() bool { return len(l.get()) == 2 && m.Snapshot().Phase == "off" })
+	// Restore publishes stopping, then off; an off that overtook stopping drops it.
+	eventually(t, func() bool { p := l.get(); return len(p) > 0 && p[len(p)-1] == "off" && m.Snapshot().Phase == "off" })
 	before, generation := l.get(), m.Snapshot().Generation
 	b.restore()
 	for i := 0; i < 3; i++ {
@@ -1135,4 +1135,65 @@ func TestTheLastStateHandedOutIsTheNewest(t *testing.T) {
 	if !slices.Equal(modes[len(modes)-4:], []string{"follow-party", "follow-lightshow", "follow-party", "follow-lightshow"}) {
 		t.Fatalf("states out of order: %v", modes)
 	}
+}
+
+func TestAReadingKeptForARunningSessionStartsNothingOnceThatSessionEnded(t *testing.T) {
+	for name, after := range map[string]func(*Manager, *fakeBackend){
+		"Stop, then Start": func(m *Manager, _ *fakeBackend) { m.Apply("stop"); settled(t, m); m.Apply("start") },
+		"sleep, then wake": func(m *Manager, _ *fakeBackend) { m.Apply("suspend"); settled(t, m); m.Apply("resume") },
+		"window closed, Start": func(m *Manager, b *fakeBackend) {
+			b.sessions[0].end(nil)
+			eventually(t, func() bool { return m.Snapshot().Phase != "running" })
+			settled(t, m)
+			m.Apply("start")
+		},
+		"Manual, Stop, then Start": func(m *Manager, _ *fakeBackend) {
+			m.Apply("manual")
+			m.Apply("follow-lightshow")
+			m.Apply("stop")
+			settled(t, m)
+			m.Apply("start")
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			b := &fakeBackend{}
+			m, _ := newManager(t, b)
+			m.Apply("follow-party")
+			m.Apply("start")
+			m.Event("follow-party", "party-on")
+			eventually(t, func() bool { return m.Snapshot().Phase == "running" })
+			m.Apply("follow-lightshow")
+			if s := settled(t, m); s.Phase != "running" || b.count() != 1 {
+				t.Fatalf("the switch did not keep the running session: %+v", s)
+			}
+			after(m, b)
+			if s := settled(t, m); s.Phase == "running" || b.count() != 1 {
+				t.Fatalf("visuals started again on Follow Party's reading: %+v, %d sessions", s, b.count())
+			}
+			m.Event("follow-lightshow", "party-on")
+			eventually(t, func() bool { return m.Snapshot().Phase == "running" })
+		})
+	}
+}
+
+func TestTheSignInSweepDoesNotRetryAStartTheOtherSourceBeganBeforeTheSwitch(t *testing.T) {
+	b := &restoringBackend{lateRestore: true}
+	m, _ := newManager(t, b)
+	m.Apply("follow-party")
+	m.Apply("start")
+	b.sweep.Lock()
+	m.Event("follow-party", "party-on")
+	if p := m.Snapshot().Phase; p != "starting" {
+		b.sweep.Unlock()
+		t.Fatalf("phase %s", p)
+	}
+	m.Apply("follow-lightshow")
+	b.sweep.Unlock()
+	eventually(t, func() bool { return m.Snapshot().Reason == ErrRestoredOpen.Error() })
+	m.CloseRestored(context.Background())
+	if s := settled(t, m); s.Phase == "running" || b.count() != 0 {
+		t.Fatalf("the sweep retried Follow Party's Start in Follow Lightshow: %+v, %d sessions", s, b.count())
+	}
+	m.Event("follow-lightshow", "party-on")
+	eventually(t, func() bool { return m.Snapshot().Phase == "running" })
 }
